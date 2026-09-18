@@ -1,0 +1,6 @@
+dash>=3,<5
+requests>=2.32,<3
+Flask>=3,<4
+Werkzeug>=3,<4
+plotly>=6,<8
+gunicorn>=23,<24
