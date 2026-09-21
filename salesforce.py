@@ -1,4 +1,5 @@
 """Read-only Salesforce OAuth/REST adapter for complete dashboard snapshots."""
+import concurrent.futures
 import math
 import os
 import re
@@ -71,7 +72,14 @@ class Salesforce:
             raise DataError('Salesforce connection settings are incomplete or invalid')
         if e.get('SF_CURRENCY') != 'USD' or e.get('SF_CURRENCY_CONFIRMED') != 'true':
             raise DataError('Confirm that the original USD financial presentation is valid before enabling live mode')
-        self.http = session or requests.Session()
+        if session:
+            self.http = session
+        else:
+            self.http = requests.Session()
+            # load() fires batched queries concurrently; widen the pool so those requests
+            # get their own connections instead of queuing behind the default size of 10.
+            adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
+            self.http.mount('https://', adapter)
         self.token = None
         self.deadline = time.monotonic() + 50
 
@@ -165,9 +173,15 @@ class Salesforce:
         fields = ['Id', 'CampaignId', 'Solutions_Rev_ACV_Net__c', 'IsWon', 'Reached_S_Status__c']
         if self.multi:
             fields.append('CurrencyIsoCode')
-        opps = self.query('SELECT ' + ','.join(fields) + f' FROM Opportunity WHERE CampaignId IN ({ids}) AND ' + restrictions() + ' ORDER BY Id')
-        influence = self.query('SELECT Id,CampaignId,OpportunityId,' + ','.join('Opportunity.' + f for f in fields) + f' FROM CampaignInfluence WHERE CampaignId IN ({ids}) AND ' + restrictions('Opportunity.') + ' ORDER BY Id')
-        members = self.query('SELECT Id,ContactId,LeadId,FirstName,LastName,Title,Email,CompanyOrAccount,CampaignId,Status,HasResponded,CreatedDate,Contact.Name,Contact.Email,Contact.Title,Contact.AccountId,Contact.Account.Name FROM CampaignMember WHERE CampaignId IN (' + ids + ') ORDER BY Id')
+        # These three queries are independent of each other (all just filter on the same
+        # campaign ids), so run them concurrently instead of waiting on each in turn.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            opps_future = pool.submit(self.query, 'SELECT ' + ','.join(fields) + f' FROM Opportunity WHERE CampaignId IN ({ids}) AND ' + restrictions() + ' ORDER BY Id')
+            influence_future = pool.submit(self.query, 'SELECT Id,CampaignId,OpportunityId,' + ','.join('Opportunity.' + f for f in fields) + f' FROM CampaignInfluence WHERE CampaignId IN ({ids}) AND ' + restrictions('Opportunity.') + ' ORDER BY Id')
+            members_future = pool.submit(self.query, 'SELECT Id,ContactId,LeadId,FirstName,LastName,Title,Email,CompanyOrAccount,CampaignId,Status,HasResponded,CreatedDate,Contact.Name,Contact.Email,Contact.Title,Contact.AccountId,Contact.Account.Name FROM CampaignMember WHERE CampaignId IN (' + ids + ') ORDER BY Id')
+            opps = opps_future.result()
+            influence = influence_future.result()
+            members = members_future.result()
         def opportunity(row):
             acv = number(row['Solutions_Rev_ACV_Net__c'], True)
             if self.multi:
@@ -195,14 +209,28 @@ class Salesforce:
             for start in range(0, len(values), 100):
                 yield values[start:start + 100]
         attrs, associations, owners = [], [], []
-        for batch in chunks(aids):
-            quoted = ','.join("'" + check_id(v) + "'" for v in batch)
-            attrs += self.query(f'SELECT Id, Remote_Licensed__c FROM Account WHERE Id IN ({quoted})')
-            associations += self.query(f'SELECT ObjectId, Territory2Id, Territory2.Name, Territory2.Territory2Type.MasterLabel, Territory2.Territory2Model.State FROM ObjectTerritory2Association WHERE ObjectId IN ({quoted})')
+        aid_batches = list(chunks(aids))
+        if aid_batches:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(aid_batches) * 2)) as pool:
+                attr_futures, assoc_futures = [], []
+                for batch in aid_batches:
+                    quoted = ','.join("'" + check_id(v) + "'" for v in batch)
+                    attr_futures.append(pool.submit(self.query, f'SELECT Id, Remote_Licensed__c FROM Account WHERE Id IN ({quoted})'))
+                    assoc_futures.append(pool.submit(self.query, f'SELECT ObjectId, Territory2Id, Territory2.Name, Territory2.Territory2Type.MasterLabel, Territory2.Territory2Model.State FROM ObjectTerritory2Association WHERE ObjectId IN ({quoted})'))
+                for future in attr_futures:
+                    attrs += future.result()
+                for future in assoc_futures:
+                    associations += future.result()
         tids = sorted({check_id(r['Territory2Id']) for r in associations})
-        for batch in chunks(tids):
-            quoted = ','.join("'" + check_id(v) + "'" for v in batch)
-            owners += self.query(f"SELECT Territory2Id, UserId, User.Name, RoleInTerritory2 FROM UserTerritory2Association WHERE Territory2Id IN ({quoted}) AND IsActive = true AND RoleInTerritory2 IN ('AE','Channel Manager')")
+        tid_batches = list(chunks(tids))
+        if tid_batches:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(tid_batches))) as pool:
+                owner_futures = []
+                for batch in tid_batches:
+                    quoted = ','.join("'" + check_id(v) + "'" for v in batch)
+                    owner_futures.append(pool.submit(self.query, f"SELECT Territory2Id, UserId, User.Name, RoleInTerritory2 FROM UserTerritory2Association WHERE Territory2Id IN ({quoted}) AND IsActive = true AND RoleInTerritory2 IN ('AE','Channel Manager')"))
+                for future in owner_futures:
+                    owners += future.result()
         attr = {check_id(a['Id']): text(a.get('Remote_Licensed__c'), True) for a in attrs}
         result['etmOwners'] = {aid: etm_owners(aid, attr.get(aid), associations, owners) for aid in aids}
         return result
