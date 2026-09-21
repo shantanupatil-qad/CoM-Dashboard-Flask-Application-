@@ -94,10 +94,14 @@ def _render_view(scope, raw, repository):
 def create_app(environ=None, repository=None):
     env = dict(os.environ if environ is None else environ)
     mode = env.get('DATA_MODE', 'demo')
+    # Explicit, off-by-default carve-out for a local single-user demo; a real deployment
+    # must not inherit "no login" just because DATA_MODE=live is set.
+    require_auth = mode == 'live' and env.get('LIVE_ALLOW_NO_AUTH') != 'true'
     repo = repository or Repository(mode, env)
     users = {}
     if mode == 'live':
         Salesforce(env)  # Validate settings without an upstream call.
+    if require_auth:
         try:
             if env.get('APP_USERS_JSON'):
                 users = json.loads(env['APP_USERS_JSON'])
@@ -112,6 +116,12 @@ def create_app(environ=None, repository=None):
                title='Champions of Manufacturing — FY27' + (' (Sample data)' if mode == 'demo' else ''),
                update_title=None)
     server = app.server
+    if env.get('TRUST_PROXY') == 'true':
+        # Only set this when a single trusted reverse proxy (e.g. Cloud Run's own front end)
+        # terminates TLS in front of this process; otherwise a client could spoof
+        # X-Forwarded-Proto and bypass the HTTPS requirement below.
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        server.wsgi_app = ProxyFix(server.wsgi_app, x_proto=1, x_for=1, x_host=1)
     server.config['MAX_CONTENT_LENGTH'] = 128 * 1024
     dummy_hash = generate_password_hash(secrets.token_urlsafe(24), method='pbkdf2:sha256') if users else ''
     attempts = defaultdict(deque)
@@ -122,6 +132,7 @@ def create_app(environ=None, repository=None):
         if mode == 'live':
             if not request.is_secure:
                 return Response('HTTPS is required', status=403)
+        if require_auth:
             # Limit failed authentication attempts per trusted proxy/client address.
             address = request.remote_addr or 'unknown'
             now = monotonic()

@@ -1,0 +1,17 @@
+.git/
+.venv/
+.venv-live/
+__pycache__/
+tests/
+*.pem
+*.key
+*.md
+.env
+.env.*
+*secrets*
+*users.json
+live_snapshot.html
+build_static_snapshot.py
+run_live_agent.py
+hash_password.py
+run_live_local.py

@@ -13,6 +13,10 @@ from config import FAMILIES
 class DataError(Exception):
     pass
 
+# TEMPORARY placeholder FX rates, pending an approved conversion policy from finance/management
+# (SFSD-33860). Replace PLACEHOLDER_FX_TO_USD with the agreed source/rates once confirmed.
+PLACEHOLDER_FX_TO_USD = {'USD': 1.0, 'GBP': 1.27, 'EUR': 1.08}
+
 def check_id(value, nullable=False):
     if value is None and nullable:
         return value
@@ -43,8 +47,11 @@ def number(value, nullable=False, integer=False):
 
 def source_date(value):
     text(value)
+    # Salesforce returns offsets like '+0000' (no colon); Python's fromisoformat before 3.11
+    # only accepts '+00:00'. Normalize so validation works under the supported 3.9+ runtimes.
+    normalized = re.sub(r'([+-]\d{2})(\d{2})$', r'\1:\2', value.replace('Z', '+00:00'))
     try:
-        datetime.fromisoformat(value.replace('Z', '+00:00'))
+        datetime.fromisoformat(normalized)
     except ValueError as exc:
         raise DataError('Invalid source date') from exc
     return value
@@ -162,9 +169,14 @@ class Salesforce:
         influence = self.query('SELECT Id,CampaignId,OpportunityId,' + ','.join('Opportunity.' + f for f in fields) + f' FROM CampaignInfluence WHERE CampaignId IN ({ids}) AND ' + restrictions('Opportunity.') + ' ORDER BY Id')
         members = self.query('SELECT Id,ContactId,LeadId,FirstName,LastName,Title,Email,CompanyOrAccount,CampaignId,Status,HasResponded,CreatedDate,Contact.Name,Contact.Email,Contact.Title,Contact.AccountId,Contact.Account.Name FROM CampaignMember WHERE CampaignId IN (' + ids + ') ORDER BY Id')
         def opportunity(row):
-            if self.multi and row['CurrencyIsoCode'] != 'USD':
-                raise DataError('Mixed or non-USD currency requires an agreed conversion policy')
-            return dict(id=check_id(row['Id']), campaignId=check_id(row['CampaignId'], True), acv=number(row['Solutions_Rev_ACV_Net__c'], True), isWon=boolean(row['IsWon']), saHit=boolean(row['Reached_S_Status__c']))
+            acv = number(row['Solutions_Rev_ACV_Net__c'], True)
+            if self.multi:
+                rate = PLACEHOLDER_FX_TO_USD.get(row['CurrencyIsoCode'])
+                if rate is None:
+                    raise DataError('Unsupported currency; the placeholder conversion table needs updating')
+                if acv is not None:
+                    acv = round(acv * rate, 2)
+            return dict(id=check_id(row['Id']), campaignId=check_id(row['CampaignId'], True), acv=acv, isWon=boolean(row['IsWon']), saHit=boolean(row['Reached_S_Status__c']))
         result = dict(campaigns=[], sourcedOpps=[opportunity(row) for row in opps], influence=[], rows=[], sessions=sessions, etmOwners={})
         for row in influence:
             o = opportunity(row['Opportunity'])
