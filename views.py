@@ -209,7 +209,7 @@ def layout():
         label='Pulling live data from Salesforce...' if scope=='campaign' else 'Loading people...' if scope=='person' else 'Loading accounts...'
         contents.append(dcc.Loading(html.Div(id=scope+'-content'),custom_spinner=spinner(label),delay_show=0))
         panels.append(html.Div(html.Main(contents,style=MAIN,className='qad-main'),id=scope+'-panel',style=dict(display='block' if scope=='campaign' else 'none'),className='qad-panel'))
-    return div([dcc.Store(id='active-tab',data='campaign'),dcc.Interval(id='live-poll',interval=15*1000,n_intervals=0)]+[dcc.Store(id=key+'-state',data=dict(page=0,filter='',selected=None,contact=None,revision=0)) for key,_ in labels]+[header]+panels,
+    return div([dcc.Store(id='active-tab',data='campaign'),dcc.Interval(id='live-poll',interval=60*1000,n_intervals=0)]+[dcc.Store(id=key+'-state',data=dict(page=0,filter='',selected=None,contact=None,revision=0)) for key,_ in labels]+[header]+panels,
         fontFamily='IBM Plex Sans, system-ui, sans-serif',background='#F5F6F7',minHeight='100vh',className='qad-shell')
 
 def source_anchor(label, kind, id):
