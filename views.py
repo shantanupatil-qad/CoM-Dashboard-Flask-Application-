@@ -198,7 +198,8 @@ def nav_style(active):
 def layout():
     labels=[('campaign','Campaign Performance'),('person','Person Engagement'),('account','Account Engagement')]
     tabs=div([html.Button(label,id='nav-'+key,n_clicks=0,style=nav_style(key=='campaign'),className='qad-tab') for key,label in labels],display='flex',gap=4,className='qad-tabs')
-    header=html.Header(div([div('QAD MARKETING OPERATIONS',fontSize=11,fontWeight=700,color=RED,letterSpacing=.5,marginBottom=4,className='qad-eyebrow'),
+    header=html.Header(div([html.Img(src='/assets/qad-redzone-logo.png',alt='QAD | Redzone',style=dict(height=28,marginBottom=14,display='block')),
+        div('QAD MARKETING OPERATIONS',fontSize=11,fontWeight=700,color=RED,letterSpacing=.5,marginBottom=4,className='qad-eyebrow'),
         html.H1('Champions of Manufacturing — FY27',style=dict(margin=0,fontSize=22,fontWeight=700,color='white')),
         html.P('Campaign performance, person engagement, and account rollups across both FY27 events',style=dict(margin='4px 0 20px',fontSize=13,color='rgba(255,255,255,0.6)')),
         div([div('LIVE OPERATIONS CONSOLE',className='qad-status-label'),div(className='qad-status-dot'),tabs],className='qad-header-bottom')],maxWidth=1600,margin='0 auto'),style=dict(background=NAVY,padding='24px 48px 0'),className='qad-header')
