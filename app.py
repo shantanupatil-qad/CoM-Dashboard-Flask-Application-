@@ -203,8 +203,8 @@ def create_app(environ=None, repository=None):
             server.logger.error('Dashboard rendering failed; reference=%s', reference)
             return views.error_box('Unable to load data. Reference: '+reference, scope)
 
-    @app.callback(Output('campaign-content', 'children'), Input('active-tab', 'data'), Input('campaign-state', 'data'))
-    def campaign_content(active, state):
+    @app.callback(Output('campaign-content', 'children'), Input('active-tab', 'data'), Input('campaign-state', 'data'), Input('live-poll', 'n_intervals'))
+    def campaign_content(active, state, _ticks):
         if active != 'campaign':
             raise PreventUpdate
         return safe_render('campaign', state)
@@ -236,8 +236,8 @@ def create_app(environ=None, repository=None):
                 raise PreventUpdate
 
         @app.callback(Output(scope+'-content', 'children'), Output(scope+'-filter-wrap', 'style'), Output(scope+'-clear', 'style'),
-                      Input(scope+'-state', 'data'), Input('active-tab', 'data'))
-        def content(state, active):
+                      Input(scope+'-state', 'data'), Input('active-tab', 'data'), Input('live-poll', 'n_intervals'))
+        def content(state, active, _ticks):
             if active != scope:
                 raise PreventUpdate
             try:

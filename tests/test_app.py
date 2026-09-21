@@ -81,7 +81,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(cards.children[0].children[-1].style,dict(display='flex',gap=20))
     def test_campaign_callback(self):
         client=create_app({}).server.test_client()
-        r=client.post('/_dash-update-component',json=dict(output='campaign-content.children',outputs=dict(id='campaign-content',property='children'),inputs=[dict(id='active-tab',property='data',value='campaign'),dict(id='campaign-state',property='data',value=initial_state())],state=[],changedPropIds=['active-tab.data']))
+        r=client.post('/_dash-update-component',json=dict(output='campaign-content.children',outputs=dict(id='campaign-content',property='children'),inputs=[dict(id='active-tab',property='data',value='campaign'),dict(id='campaign-state',property='data',value=initial_state()),dict(id='live-poll',property='n_intervals',value=0)],state=[],changedPropIds=['active-tab.data']))
         self.assertEqual(r.status_code,200); self.assertIn('Net ACV',r.get_data(as_text=True)); self.assertNotIn('Total members',r.get_data(as_text=True))
     def test_pattern_callback(self):
         client=create_app({}).server.test_client(); button=dict(scope='person',action='select',key=people(demo_data())[0]['id'])
