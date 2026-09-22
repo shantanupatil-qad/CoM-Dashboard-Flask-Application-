@@ -59,6 +59,11 @@ def boolean(value):
         raise DataError('Expected Boolean field')
     return value
 
+def is_qad_owned(*names):
+    # QAD's own accounts/employees must never appear in registration, engagement, or account
+    # reporting -- matches 'QAD', 'QAD Inc.', 'QAD Is/Esc', 'QAD User Groups', 'QAD | Redzone', etc.
+    return any(str(n or '').strip().lower().startswith('qad') for n in names)
+
 def number(value, nullable=False, integer=False):
     if value is None and nullable:
         return None
@@ -223,6 +228,8 @@ class Salesforce:
             if not (cid or lid):
                 raise DataError('Campaign membership has no person')
             account = contact.get('Account') or {}
+            if is_qad_owned(account.get('Name'), row.get('CompanyOrAccount')):
+                continue
             result['rows'].append(dict(id=check_id(row['Id']), cid=cid, lid=lid, name=' '.join(v for v in [text(row['FirstName'], True), text(row['LastName'], True)] if v) or '(no name)', title=text(row.get('Title'), True), email=text(row.get('Email'), True), company=text(row.get('CompanyOrAccount'), True), aid=check_id(contact.get('AccountId'), True), accountName=text(account.get('Name'), True), ctitle=text(contact.get('Title'), True), cname=text(contact.get('Name'), True), cemail=text(contact.get('Email'), True), camp=check_id(row['CampaignId']), st=text(row['Status']), hr=boolean(row['HasResponded']), cd=source_date(row['CreatedDate'])))
         if any(row['camp'] not in cfg['family'] for row in result['rows']) or any(row['campaignId'] not in cfg['family'] for row in result['sourcedOpps']) or any(row['ic'] not in cfg['family'] for row in result['influence']):
             raise DataError('Unexpected campaign in Salesforce source results')
