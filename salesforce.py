@@ -14,9 +14,31 @@ from config import FAMILIES
 class DataError(Exception):
     pass
 
-# TEMPORARY placeholder FX rates, pending an approved conversion policy from finance/management
-# (SFSD-33860). Replace PLACEHOLDER_FX_TO_USD with the agreed source/rates once confirmed.
-PLACEHOLDER_FX_TO_USD = {'USD': 1.0, 'GBP': 1.27, 'EUR': 1.08, 'BRL': 0.19}
+# Corporate currency conversion rates (SFSD-33860), expressed as units of currency per
+# 1 USD -- the same convention as Salesforce's CurrencyType.ConversionRate. To convert an
+# amount FROM this currency TO USD, divide by the rate.
+FX_RATE_PER_USD = {
+    'USD': 1.0,         # U.S. Dollar
+    'AUD': 1.404307,    # Australian Dollar
+    'BRL': 5.144215,    # Brazilian Real
+    'CAD': 1.39957,     # Canadian Dollar
+    'CHF': 0.82272,     # Swiss Franc
+    'CNY': 6.746,       # Chinese Yuan
+    'CZK': 21.207277,   # Czech Koruna
+    'EUR': 0.87124,     # Euro
+    'GBP': 0.746893,    # British Pound
+    'IDR': 17818.00,    # Indonesian Rupiah
+    'INR': 96.001,      # Indian Rupee
+    'JPY': 157.015,     # Japanese Yen
+    'MXN': 17.2323,     # Mexican Peso
+    'MYR': 3.9235,      # Malaysian Ringgit
+    'NZD': 1.747855,    # New Zealand Dollar
+    'PLN': 3.7998,      # Polish Zloty
+    'SEK': 9.839509,    # Swedish Krona
+    'SGD': 1.276125,    # Singapore Dollar
+    'THB': 33.345,      # Thai Baht
+    'ZAR': 16.25585,    # South African Rand
+}
 
 def check_id(value, nullable=False):
     if value is None and nullable:
@@ -185,11 +207,11 @@ class Salesforce:
         def opportunity(row):
             acv = number(row['Solutions_Rev_ACV_Net__c'], True)
             if self.multi:
-                rate = PLACEHOLDER_FX_TO_USD.get(row['CurrencyIsoCode'])
+                rate = FX_RATE_PER_USD.get(row['CurrencyIsoCode'])
                 if rate is None:
-                    raise DataError('Unsupported currency; the placeholder conversion table needs updating')
+                    raise DataError('Unsupported currency; the FX conversion table needs updating')
                 if acv is not None:
-                    acv = round(acv * rate, 2)
+                    acv = round(acv / rate, 2)
             return dict(id=check_id(row['Id']), campaignId=check_id(row['CampaignId'], True), acv=acv, isWon=boolean(row['IsWon']), saHit=boolean(row['Reached_S_Status__c']))
         result = dict(campaigns=[], sourcedOpps=[opportunity(row) for row in opps], influence=[], rows=[], sessions=sessions, etmOwners={})
         for row in influence:
