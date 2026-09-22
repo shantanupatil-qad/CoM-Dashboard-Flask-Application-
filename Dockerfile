@@ -11,4 +11,8 @@ COPY assets/ assets/
 ENV PORT=8080
 EXPOSE 8080
 
-CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --timeout 65 app:server
+# A single worker keeps exactly one shared 60s Salesforce cache per container instance --
+# with 2+ workers, each has its own cache and can independently trigger a redundant
+# concurrent reload, compounding into multi-second stalls. Threads still give real concurrency
+# for this I/O-bound (network-call-heavy) workload.
+CMD exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 8 --timeout 65 app:server
