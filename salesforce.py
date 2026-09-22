@@ -16,7 +16,7 @@ class DataError(Exception):
 
 # TEMPORARY placeholder FX rates, pending an approved conversion policy from finance/management
 # (SFSD-33860). Replace PLACEHOLDER_FX_TO_USD with the agreed source/rates once confirmed.
-PLACEHOLDER_FX_TO_USD = {'USD': 1.0, 'GBP': 1.27, 'EUR': 1.08}
+PLACEHOLDER_FX_TO_USD = {'USD': 1.0, 'GBP': 1.27, 'EUR': 1.08, 'BRL': 0.19}
 
 def check_id(value, nullable=False):
     if value is None and nullable:
