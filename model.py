@@ -87,14 +87,21 @@ def people(data):
         p['latest'] = max(p['latest'], r['cd'])
         p['memberships'].append(dict(campaignId=r['camp'], status=r['st'], hasResponded=r['hr'], createdDate=r['cd']))
     result = list(grouped.values())
-    from campaigns import config, widget_count
+    from campaigns import config, widget_count, widget_engaged
     family = config()['family']
+    widgets = config()['widgets']
     for p in result:
         p['engagedCount'] = widget_count(p['memberships'])
+        p['namerEngaged'] = sum(widget_engaged(w, p['memberships']) for w in widgets if w['event'] == 'namer')
+        p['emeaEngaged'] = sum(widget_engaged(w, p['memberships']) for w in widgets if w['event'] == 'emea')
         p['opportunities'] = data.get('personOpportunities', {}).get(p['id'], [])
     result.sort(key=lambda p: (p['latest'], p['id']), reverse=True)
-    # NAMER-engaged people first, then EMEA-only, preserving the recency order within each group.
-    result.sort(key=lambda p: 0 if any(family.get(m['campaignId']) == 'namer' for m in p['memberships']) else 1)
+    # NAMER-engaged people first, then EMEA-only; within each group, most engagements
+    # in that group's region come first, ties broken by the recency order above.
+    def region_rank(p):
+        is_namer = any(family.get(m['campaignId']) == 'namer' for m in p['memberships'])
+        return (0, -p['namerEngaged']) if is_namer else (1, -p['emeaEngaged'])
+    result.sort(key=region_rank)
     return result
 
 def accounts(data):
