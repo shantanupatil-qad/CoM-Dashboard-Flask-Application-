@@ -132,9 +132,15 @@ def sf_gauge(gauge):
                 sf_card_footer(gauge)],
                **SF_CARD, flex=1, minWidth=280)
 
+SF_DASHBOARD_LINK_URL = 'https://qad.lightning.force.com/lightning/r/Dashboard/01ZTR00000ECX6b2AH/view?queryScope=userFolders'
+
+def sf_dashboard_link():
+    return html.A('Open in Salesforce ↗', href=SF_DASHBOARD_LINK_URL, target='_blank', rel='noreferrer',
+                   style=dict(display='inline-block', marginBottom=16, fontSize=13, fontWeight=600, color=SF_LINK, textDecoration='none'))
+
 def home_page(dashboard):
     if not dashboard or not (dashboard.get('metrics') or dashboard.get('bars') or dashboard.get('gauges')):
-        return html.P('No dashboard data available.', style=dict(color='#9CA3AF', fontSize=13))
+        return [sf_dashboard_link(), html.P('No dashboard data available.', style=dict(color='#9CA3AF', fontSize=13))]
     by_header = {item['header']: item for group in ('metrics', 'bars', 'gauges') for item in dashboard.get(group, [])}
     # Mirrors the real dashboard's exact grid: 4 metric/bar columns (Influenced Opps,
     # Influenced Revenue, Sourced Opps, Sourced Revenue), then 2 half-width gauges below.
@@ -144,7 +150,8 @@ def home_page(dashboard):
     metrics_row = div([sf_metric(by_header[h]) for h in metric_headers if h in by_header], display='flex', gap=1)
     bars_row = div([sf_bar(by_header[h]) for h in bar_headers if h in by_header], display='flex', gap=1, marginTop=1)
     gauges_row = div([sf_gauge(by_header[h]) for h in gauge_headers if h in by_header], display='flex', gap=1, marginTop=1)
-    return [div([sf_note(note) for note in dashboard.get('notes', [])], display='flex', gap=1, marginBottom=20),
+    return [sf_dashboard_link(),
+            div([sf_note(note) for note in dashboard.get('notes', [])], display='flex', gap=1, marginBottom=20),
             metrics_row, bars_row, gauges_row,
             html.P('Live from the "QAD | Redzone - Insights - CoM FY27" Salesforce dashboard (Public Dashboards).',
                    style=dict(marginTop=24, fontSize=11, color='#9CA3AF', textAlign='center'))]
