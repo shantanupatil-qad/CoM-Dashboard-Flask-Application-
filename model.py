@@ -90,6 +90,7 @@ def people(data):
     for p in result:
         from campaigns import widget_count
         p['engagedCount'] = widget_count(p['memberships'])
+        p['opportunities'] = data.get('personOpportunities', {}).get(p['id'], [])
     return sorted(result, key=lambda p: (p['latest'], p['id']), reverse=True)
 
 def accounts(data):
@@ -103,6 +104,7 @@ def accounts(data):
     result = list(grouped.values())
     for a in result:
         a['etmOwners'] = data.get('etmOwners', {}).get(a['aid'], [])
+        a['personOpportunities'] = data.get('personOpportunities', {})
         a['contactCount'] = len({r['cid'] for r in a['rows']})
         a['engagedTouchpoints'] = sum(engaged(r['st'], r['hr']) for r in a['rows'])
     return sorted(result, key=lambda a: (a['latest'], a['aid']), reverse=True)

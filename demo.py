@@ -41,7 +41,8 @@ def demo_data():
                 dict(**demo_common, header='Sourced Pipeline - Services Revenue Target', value=650000,
                      breaks=[dict(color='#c23934', lowerBound=1000000, upperBound=1000001), dict(color='#ca8501', lowerBound=1000001, upperBound=1000002), dict(color='#00716b', lowerBound=1000002, upperBound=1000003)])],
     )
+    person_opportunities = {sid('003', 0): [dict(id=sid('006', 0), name='Aster Manufacturing - New Business', acv=25000, primaryCampaignName='Corp-NAMER-FY27-EV-Champions America #CoM')]}
     return dict(sessions=sessions,etmOwners={sid('001',0):[dict(bu='ERP',names='Demo Owner')]},campaigns=[dict(id=f['parentId'], contacts=120 if ev=='namer' else 80, leads=50 if ev=='namer' else 35, convertedLeads=10 if ev=='namer' else 5) for ev,f in FAMILIES.items()],
         sourcedOpps=[dict(id=sid('006', n), campaignId=CAMPAIGNS[n%8]['id'], acv=25000+n*12500, isWon=n%3==0, saHit=n%2==0) for n in range(12)],
         influence=[dict(ic=CAMPAIGNS[n%8]['id'], oi=sid('006', 30+n//2), pc=None, acv=40000+(n//2)*10000, won=n%4==0, sa=n%3!=0) for n in range(10)], rows=rows,
-        sfDashboard=sf_dashboard)
+        sfDashboard=sf_dashboard, personOpportunities=person_opportunities)

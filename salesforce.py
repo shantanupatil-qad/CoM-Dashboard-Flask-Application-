@@ -290,7 +290,7 @@ class Salesforce:
         ids = ','.join("'" + c['id'] + "'" for c in cfg['campaigns'])
         def restrictions(prefix=''):
             return (f"{prefix}Category__c IN ('Solutions','Services') AND {prefix}OwnerId != '00530000000lVx8AAE' AND {prefix}Type != 'Admin $0' AND {prefix}Substage__c != 'Closed-Duplicate' " + ' '.join(f"AND (NOT {prefix}Name LIKE '%{word}%')" for word in ('DEBOOK','DE-BOOK','DE BOOK','Amendment','Renewal')))
-        fields = ['Id', 'CampaignId', 'Solutions_Rev_ACV_Net__c', 'IsWon', 'Reached_S_Status__c']
+        fields = ['Id', 'Name', 'CampaignId', 'Campaign.Name', 'Solutions_Rev_ACV_Net__c', 'IsWon', 'Reached_S_Status__c']
         if self.multi:
             fields.append('CurrencyIsoCode')
         # These queries are independent of each other (the dashboard snapshot doesn't depend
@@ -312,10 +312,16 @@ class Salesforce:
                     raise DataError('Unsupported currency; the FX conversion table needs updating')
                 if acv is not None:
                     acv = round(acv / rate, 2)
-            return dict(id=check_id(row['Id']), campaignId=check_id(row['CampaignId'], True), acv=acv, isWon=boolean(row['IsWon']), saHit=boolean(row['Reached_S_Status__c']))
-        result = dict(campaigns=[], sourcedOpps=[opportunity(row) for row in opps], influence=[], rows=[], sessions=sessions, etmOwners={}, sfDashboard=sf_dashboard)
+            return dict(id=check_id(row['Id']), campaignId=check_id(row['CampaignId'], True), acv=acv, isWon=boolean(row['IsWon']), saHit=boolean(row['Reached_S_Status__c']),
+                        name=text(row['Name'], True), primaryCampaignName=text((row.get('Campaign') or {}).get('Name'), True))
+        opp_details = {}
+        for row in opps:
+            o = opportunity(row)
+            opp_details[o['id']] = dict(id=o['id'], name=o['name'], acv=o['acv'], primaryCampaignName=o['primaryCampaignName'])
+        result = dict(campaigns=[], sourcedOpps=[opportunity(row) for row in opps], influence=[], rows=[], sessions=sessions, etmOwners={}, sfDashboard=sf_dashboard, personOpportunities={})
         for row in influence:
             o = opportunity(row['Opportunity'])
+            opp_details.setdefault(o['id'], dict(id=o['id'], name=o['name'], acv=o['acv'], primaryCampaignName=o['primaryCampaignName']))
             result['influence'].append(dict(ic=check_id(row['CampaignId']), oi=check_id(row['OpportunityId']), pc=o['campaignId'], acv=o['acv'], won=o['isWon'], sa=o['saHit']))
         for row in members:
             contact = row.get('Contact') or {}
@@ -332,19 +338,30 @@ class Salesforce:
         def chunks(values):
             for start in range(0, len(values), 100):
                 yield values[start:start + 100]
-        attrs, associations, owners = [], [], []
+        attrs, associations, owners, contact_roles = [], [], [], []
         aid_batches = list(chunks(aids))
-        if aid_batches:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(aid_batches) * 2)) as pool:
-                attr_futures, assoc_futures = [], []
+        opp_id_batches = list(chunks(sorted(opp_details)))
+        if aid_batches or opp_id_batches:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(aid_batches) * 2 + len(opp_id_batches))) as pool:
+                attr_futures, assoc_futures, role_futures = [], [], []
                 for batch in aid_batches:
                     quoted = ','.join("'" + check_id(v) + "'" for v in batch)
                     attr_futures.append(pool.submit(self.query, f'SELECT Id, Remote_Licensed__c FROM Account WHERE Id IN ({quoted})'))
                     assoc_futures.append(pool.submit(self.query, f'SELECT ObjectId, Territory2Id, Territory2.Name, Territory2.Territory2Type.MasterLabel, Territory2.Territory2Model.State FROM ObjectTerritory2Association WHERE ObjectId IN ({quoted})'))
+                for batch in opp_id_batches:
+                    quoted = ','.join("'" + check_id(v) + "'" for v in batch)
+                    role_futures.append(pool.submit(self.query, f'SELECT ContactId, OpportunityId FROM OpportunityContactRole WHERE OpportunityId IN ({quoted}) AND ContactId != null'))
                 for future in attr_futures:
                     attrs += future.result()
                 for future in assoc_futures:
                     associations += future.result()
+                for future in role_futures:
+                    contact_roles += future.result()
+        person_opp_ids = {}
+        for row in contact_roles:
+            cid, oid = check_id(row['ContactId']), check_id(row['OpportunityId'])
+            person_opp_ids.setdefault(cid, set()).add(oid)
+        result['personOpportunities'] = {cid: [opp_details[oid] for oid in sorted(oids) if oid in opp_details] for cid, oids in person_opp_ids.items()}
         tids = sorted({check_id(r['Territory2Id']) for r in associations})
         tid_batches = list(chunks(tids))
         if tid_batches:

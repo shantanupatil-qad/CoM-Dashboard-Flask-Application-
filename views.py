@@ -195,6 +195,18 @@ def timeline(memberships, account=False):
             position='relative',paddingBottom=0 if i==len(ordered)-1 else 18))
     return div(rows,borderLeft='2px solid #E5E7EB',paddingLeft=20)
 
+def opportunities_section(opportunities):
+    if not opportunities:
+        body = html.P('No opportunities found for this person.', style=dict(margin=0, color='#9CA3AF', fontSize=13))
+    else:
+        rows = [div([div(source_anchor(o['name'] or o['id'], 'Opportunity', o['id']), fontWeight=600, color=NAVY, flex=1),
+                     div(money(o['acv']), fontWeight=600, color=STEEL, minWidth=100, textAlign='right'),
+                     div(o.get('primaryCampaignName') or '—', color='#6B7280', fontSize=12, minWidth=220, textAlign='right')],
+                    display='flex', gap=16, alignItems='center', padding='10px 0', borderBottom='1px solid #F3F4F6')
+                for o in opportunities]
+        body = div(rows)
+    return div([div('OPPORTUNITIES', fontSize=10, fontWeight=700, color=NAVY, letterSpacing=1.2, margin='8px 0 14px'), body], marginBottom=26)
+
 def person_detail(person, scope='person'):
     CAMPAIGNS = config()['widgets']
     memberships=person['memberships']
@@ -210,6 +222,7 @@ def person_detail(person, scope='person'):
         any_membership=any(any(m['campaignId'] in c['campaignIds'] for m in memberships) for c in camps)
         children.append(div([div(FAMILIES[ev]['label'].upper()+(' — NO ACTIVITY' if not any_membership else ''),fontSize=10,fontWeight=700,color=NAVY,letterSpacing=1.2,marginBottom=10),
             div([pill(c,by_campaign.get(c['id'])) for c in camps],display='flex',gap=12,flexWrap='wrap')],marginBottom=26,opacity=1 if any_membership else .45))
+    children.append(opportunities_section(person.get('opportunities', [])))
     children.extend([div('TIMELINE',fontSize=10,fontWeight=700,color=NAVY,letterSpacing=1.2,margin='8px 0 14px'),timeline(memberships)])
     return div(children,**CARD)
 
@@ -264,7 +277,8 @@ def account_table(accounts,page,has_next,term):
 def account_contacts(account):
     by_contact={}
     for r in account['rows']:
-        c=by_contact.setdefault(r['cid'],dict(id=r['cid'],name=r['cname'] or r['name'],email=r['cemail'],title=r.get('ctitle'),memberships=[]))
+        c=by_contact.setdefault(r['cid'],dict(id=r['cid'],name=r['cname'] or r['name'],email=r['cemail'],title=r.get('ctitle'),memberships=[],
+            opportunities=account.get('personOpportunities',{}).get(r['cid'],[])))
         c['memberships'].append(dict(campaignId=r['camp'],status=r['st'],hasResponded=r['hr'],createdDate=r['cd']))
     return list(by_contact.values())
 
