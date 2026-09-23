@@ -252,22 +252,30 @@ class Salesforce:
                     continue
                 if not data:
                     continue
-                fact_map = data['reportResult']['factMap']
+                result = data['reportResult']
+                fact_map = result['factMap']
+                report_meta = result['reportMetadata']
+                extended = result['reportExtendedMetadata']
+                aggregate_name = (props.get('aggregates') or [{}])[0].get('name')
+                common = dict(header=header, reportId=check_id(report_meta['id']), reportName=text(report_meta['name']),
+                              refreshDate=source_date(data['status']['refreshDate']),
+                              aggregateLabel=text((extended.get('aggregateColumnInfo') or {}).get(aggregate_name, {}).get('label'), True))
                 if viz == 'Metric':
                     entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
-                    metrics.append(dict(header=header, value=number(entry.get('value'), True), label=text(entry.get('label'), True), breaks=color_breaks(props)))
+                    metrics.append(dict(**common, value=number(entry.get('value'), True), label=text(entry.get('label'), True), breaks=color_breaks(props)))
                 elif viz == 'Bar':
-                    groupings = data['reportResult']['groupingsDown']['groupings']
+                    groupings = result['groupingsDown']['groupings']
+                    grouping_info = next(iter((extended.get('groupingColumnInfo') or {}).values()), {})
                     groups = []
                     for g in groupings:
                         entry = ((fact_map.get(g['key'] + '!T') or {}).get('aggregates') or [{}])[0]
                         groups.append(dict(label=text(g['label']), value=number(entry.get('value'), True) or 0, valueLabel=text(entry.get('label'), True)))
-                    bars.append(dict(header=header, groups=groups))
+                    bars.append(dict(**common, groups=groups, groupingLabel=text(grouping_info.get('label'), True)))
                 elif viz == 'Gauge':
                     entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
                     breaks = color_breaks(props)
                     green = next((b for b in breaks if b['color'] == '#00716b'), None)
-                    gauges.append(dict(header=header, value=number(entry.get('value'), True), label=text(entry.get('label'), True),
+                    gauges.append(dict(**common, value=number(entry.get('value'), True), label=text(entry.get('label'), True),
                                         target=green['lowerBound'] if green else None, breaks=breaks))
             return dict(notes=notes, metrics=metrics, bars=bars, gauges=gauges)
         except (KeyError, TypeError, IndexError) as exc:

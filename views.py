@@ -2,7 +2,7 @@
 import plotly.graph_objects as go
 from dash import html, dcc
 from config import CAMPAIGNS, CAMPAIGN_BY_ID, FAMILIES, RED, NAVY, STEEL, GREEN, AMBER, PLUM
-from model import engaged, fmt_date, money
+from model import engaged, fmt_date, money, abbreviate, sf_refresh_label
 from campaigns import config, widget_count, widget_engaged
 
 MAIN = dict(maxWidth=1600, margin='0 auto', padding='32px 48px 60px')
@@ -47,16 +47,25 @@ def event_card(ev, data):
         div([pipeline('SOURCED (Primary Campaign)','#EFF6FF',NAVY,data['sourced']),pipeline('INFLUENCED (Touched, Sourced Elsewhere)','#F5F3FF',PLUM,data['influenced'])],display='flex',gap=20)],
         **{**CARD,'flex':1,'minWidth':420,'className':'qad-event-card'})
 
-def sf_note(runs):
-    children = []
-    for run in runs:
-        text = run['text']
-        if run.get('bold'):
-            text = html.Strong(text)
-        if run.get('underline'):
-            text = html.U(text)
-        children.append(text)
-    return html.P(children, style=dict(margin=0, fontSize=13, color='#374151', lineHeight=1.6))
+SF_CARD = dict(background='white', border='1px solid #DDDBDA', borderRadius=4, padding='16px 18px 14px')
+SF_BLUE = '#5B9BD5'
+SF_LINK = '#0176D3'
+SF_GRAY = '#706E6B'
+SF_TEXT = '#181818'
+
+def sf_report_url(report_id):
+    return f'https://qad.lightning.force.com/lightning/r/Report/{report_id}/view'
+
+def sf_card_icons(item):
+    return div([html.Span('↻', title='Refresh', style=dict(fontSize=14, color=SF_GRAY, marginRight=10, cursor='default')),
+                html.A('⛶', href=sf_report_url(item['reportId']), target='_blank', title='View report', style=dict(fontSize=13, color=SF_GRAY, textDecoration='none'))],
+               display='flex', alignItems='center', flexShrink=0)
+
+def sf_card_footer(item):
+    return div([html.A('View Report (' + item.get('reportName', '') + ')', href=sf_report_url(item['reportId']), target='_blank',
+                        style=dict(color=SF_LINK, fontSize=12, textDecoration='none', display='block', overflow='hidden', textOverflow='ellipsis', whiteSpace='nowrap', maxWidth=260)),
+                div(sf_refresh_label(item.get('refreshDate')) or '', fontSize=11, color=SF_GRAY, marginTop=2)],
+               marginTop=12)
 
 def break_color(value, breaks, default=NAVY):
     if value is None:
@@ -67,21 +76,39 @@ def break_color(value, breaks, default=NAVY):
             return b['color']
     return default
 
+def sf_note(runs):
+    children = []
+    for run in runs:
+        node = run['text']
+        if run.get('bold'):
+            node = html.Strong(node)
+        if run.get('underline'):
+            node = html.U(node)
+        children.append(node)
+    return div([html.Span('⛶', style=dict(float='right', color=SF_GRAY, fontSize=13)),
+                html.P(children, style=dict(margin=0, fontSize=14, color=SF_TEXT, lineHeight=1.6))],
+               **SF_CARD, flex=1, minWidth=320)
+
 def sf_metric(metric):
     color = break_color(metric.get('value'), metric.get('breaks') or [])
-    return div([div(metric['label'] if metric.get('label') is not None else '—', fontSize=28, fontWeight=700, color=color),
-                div(metric['header'], fontSize=11, color='#9CA3AF', marginTop=4, textAlign='center')],
-                background='#F9FAFB', border='1px solid #E5E7EB', borderRadius=10, padding='18px 20px', textAlign='center', flex=1, minWidth=160)
+    return div([div([div(metric['header'], fontSize=15, color=SF_TEXT), sf_card_icons(metric)], display='flex', justifyContent='space-between', alignItems='flex-start'),
+                div(abbreviate(metric.get('value')), fontSize=56, fontWeight=300, color=color, margin='8px 0'),
+                sf_card_footer(metric)],
+               **SF_CARD, flex=1, minWidth=220)
 
 def sf_bar(bar):
-    groups = bar['groups']
-    fig = go.Figure(go.Bar(x=[g['label'] for g in groups], y=[g['value'] for g in groups],
-                            marker_color=PLUM, text=[g.get('valueLabel') or g['value'] for g in groups], textposition='outside'))
-    fig.update_layout(title=None, height=260, margin=dict(l=30, r=10, t=10, b=40), paper_bgcolor='white', plot_bgcolor='white',
-                       font=dict(family='IBM Plex Sans, system-ui, sans-serif', size=11, color=STEEL), yaxis=dict(visible=False))
-    return div([div(bar['header'], fontSize=11, fontWeight=700, color=NAVY, letterSpacing=.5, marginBottom=6),
-                dcc.Graph(figure=fig, config=dict(displayModeBar=False))],
-               background='white', border='1px solid #E5E7EB', borderRadius=10, padding='16px', flex=1, minWidth=280)
+    groups = list(reversed(bar['groups']))
+    fig = go.Figure(go.Bar(y=[g['label'] for g in groups], x=[g['value'] for g in groups], orientation='h',
+                            marker_color=SF_BLUE, text=[g.get('valueLabel') or g['value'] for g in groups], textposition='outside', cliponaxis=False))
+    fig.update_layout(margin=dict(l=10, r=40, t=10, b=10), height=220, paper_bgcolor='white', plot_bgcolor='white',
+                       font=dict(family='Salesforce Sans, IBM Plex Sans, system-ui, sans-serif', size=11, color='#3E3E3C'),
+                       yaxis=dict(title=dict(text=bar.get('groupingLabel'), font=dict(size=10)), automargin=True),
+                       xaxis=dict(showgrid=True, gridcolor='#F3F2F2', zeroline=False))
+    return div([div([div(bar['header'], fontSize=15, color=SF_TEXT), sf_card_icons(bar)], display='flex', justifyContent='space-between', alignItems='flex-start'),
+                div(bar.get('aggregateLabel') or '', fontSize=11, color=SF_GRAY, textAlign='center', marginTop=4),
+                dcc.Graph(figure=fig, config=dict(displayModeBar=False)),
+                sf_card_footer(bar)],
+               **SF_CARD, flex=1, minWidth=300)
 
 def sf_gauge(gauge):
     value = gauge.get('value') or 0
@@ -96,13 +123,14 @@ def sf_gauge(gauge):
         upper = b['upperBound'] if b.get('upperBound') is not None else axis_max
         steps.append(dict(range=[prev, upper], color=b['color']))
         prev = upper
-    fig = go.Figure(go.Indicator(mode='gauge+number', value=value, number=dict(valueformat=','),
+    fig = go.Figure(go.Indicator(mode='gauge+number', value=value, number=dict(valueformat=',', font=dict(size=32)),
         gauge=dict(axis=dict(range=[0, axis_max], visible=True), bar=dict(color='rgba(15,16,17,0.55)', thickness=0.35), steps=steps)))
-    fig.update_layout(height=220, margin=dict(l=30, r=30, t=30, b=10), paper_bgcolor='white',
-                       font=dict(family='IBM Plex Sans, system-ui, sans-serif', size=12, color=STEEL))
-    return div([div(gauge['header'], fontSize=11, fontWeight=700, color=NAVY, letterSpacing=.5, marginBottom=6, textAlign='center'),
-                dcc.Graph(figure=fig, config=dict(displayModeBar=False))],
-               background='white', border='1px solid #E5E7EB', borderRadius=10, padding='16px', flex=1, minWidth=280)
+    fig.update_layout(height=200, margin=dict(l=30, r=30, t=20, b=10), paper_bgcolor='white',
+                       font=dict(family='Salesforce Sans, IBM Plex Sans, system-ui, sans-serif', size=12, color='#3E3E3C'))
+    return div([div([div(gauge['header'], fontSize=15, color=SF_TEXT), sf_card_icons(gauge)], display='flex', justifyContent='space-between', alignItems='flex-start'),
+                dcc.Graph(figure=fig, config=dict(displayModeBar=False)),
+                sf_card_footer(gauge)],
+               **SF_CARD, flex=1, minWidth=280)
 
 def home_page(dashboard):
     if not dashboard or not (dashboard.get('metrics') or dashboard.get('bars') or dashboard.get('gauges')):
@@ -113,10 +141,10 @@ def home_page(dashboard):
     metric_headers = ['Total Influenced Opportunities', 'Total Influenced Solutions Revenue', 'Total Sourced Opportunities', 'Total Sourced Solutions Revenue']
     bar_headers = ['Influenced Opportunities by Region', 'Influenced Solutions Revenue by Region', 'Sourced Opportunities by Region', 'Sourced Solutions Revenue by Region']
     gauge_headers = ['Influence Pipeline - Services Revenue Target', 'Sourced Pipeline - Services Revenue Target']
-    metrics_row = div([sf_metric(by_header[h]) for h in metric_headers if h in by_header], display='flex', gap=16, marginBottom=16, flexWrap='wrap')
-    bars_row = div([sf_bar(by_header[h]) for h in bar_headers if h in by_header], display='flex', gap=16, marginBottom=16, flexWrap='wrap')
-    gauges_row = div([sf_gauge(by_header[h]) for h in gauge_headers if h in by_header], display='flex', gap=16, flexWrap='wrap')
-    return [div([sf_note(note) for note in dashboard.get('notes', [])], display='flex', gap=24, flexWrap='wrap', marginBottom=28, className='qad-sf-notes'),
+    metrics_row = div([sf_metric(by_header[h]) for h in metric_headers if h in by_header], display='flex', gap=1)
+    bars_row = div([sf_bar(by_header[h]) for h in bar_headers if h in by_header], display='flex', gap=1, marginTop=1)
+    gauges_row = div([sf_gauge(by_header[h]) for h in gauge_headers if h in by_header], display='flex', gap=1, marginTop=1)
+    return [div([sf_note(note) for note in dashboard.get('notes', [])], display='flex', gap=1, marginBottom=20),
             metrics_row, bars_row, gauges_row,
             html.P('Live from the "QAD | Redzone - Insights - CoM FY27" Salesforce dashboard (Public Dashboards).',
                    style=dict(marginTop=24, fontSize=11, color='#9CA3AF', textAlign='center'))]

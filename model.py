@@ -1,6 +1,8 @@
 """Original business rules, executed deterministically in Python."""
+import re
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
+from zoneinfo import ZoneInfo
 from config import CAMPAIGNS, FAMILY_MAP, ENGAGED_STATUSES, PAGE_SIZE
 
 def engaged(status, responded):
@@ -18,6 +20,26 @@ def fmt_date(value):
 def money(value):
     amount = Decimal(str(value or 0)).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
     return f'-${abs(amount):,}' if amount < 0 else f'${amount:,}'
+
+def abbreviate(value):
+    # Matches Salesforce dashboard metrics' "auto" display units (e.g. 16,550,903 -> "17M").
+    if value is None:
+        return '—'
+    amount = float(value)
+    for divisor, suffix in ((1_000_000_000, 'B'), (1_000_000, 'M'), (1_000, 'K')):
+        if abs(amount) >= divisor:
+            return f'{amount / divisor:,.0f}{suffix}'
+    return f'{amount:,.0f}'
+
+def sf_refresh_label(iso_value):
+    if not iso_value:
+        return None
+    normalized = re.sub(r'([+-]\d{2})(\d{2})$', r'\1:\2', iso_value.replace('Z', '+00:00'))
+    try:
+        dt = datetime.fromisoformat(normalized).astimezone(ZoneInfo('America/Los_Angeles'))
+    except ValueError:
+        return None
+    return f"As of {dt.strftime('%b %-d, %Y %-I:%M %p')}"
 
 def empty_bucket():
     return dict(count=0, value=Decimal(0), wonCount=0, wonValue=Decimal(0), saCount=0, saValue=Decimal(0))
