@@ -1,5 +1,6 @@
 """Read-only Salesforce OAuth/REST adapter for complete dashboard snapshots."""
 import concurrent.futures
+import json
 import math
 import os
 import re
@@ -58,6 +59,30 @@ def boolean(value):
     if type(value) is not bool:
         raise DataError('Expected Boolean field')
     return value
+
+# The official "QAD | Redzone - Insights - CoM FY27" Salesforce dashboard (Public Dashboards
+# folder), replicated on the app's Home tab using its own live, pre-computed report results.
+DASHBOARD_ID = '01ZTR00000ECX6b2AH'
+
+def quill_runs(rich_text_json):
+    # Parses a Quill Delta-style rich text note into plain runs of text with bold/underline
+    # flags, dropping formatting we don't render (font size, alignment, etc).
+    try:
+        ops = json.loads(rich_text_json or '[]')
+    except ValueError:
+        return []
+    if not isinstance(ops, list):
+        return []
+    runs = []
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+        insert = op.get('insert')
+        if not isinstance(insert, str) or insert.strip() in ('', '\n'):
+            continue
+        attrs = op.get('attributes') if isinstance(op.get('attributes'), dict) else {}
+        runs.append(dict(text=insert, bold=bool(attrs.get('bold')), underline=bool(attrs.get('underline'))))
+    return runs
 
 def is_qad_owned(*names):
     # QAD's own accounts/employees must never appear in registration, engagement, or account
@@ -188,6 +213,61 @@ class Salesforce:
                 raise DataError('Invalid Salesforce query response') from None
         return rows
 
+    def authed_get(self, path):
+        if not self.token:
+            self.login()
+        response = self.request(path, method='GET', headers={'Authorization': 'Bearer ' + self.token})
+        if response.status_code == 401:
+            self.login()
+            response = self.request(path, method='GET', headers={'Authorization': 'Bearer ' + self.token})
+        if response.status_code != 200:
+            raise DataError('Salesforce dashboard fetch failed')
+        try:
+            return response.json()
+        except ValueError:
+            raise DataError('Invalid Salesforce dashboard response') from None
+
+    def dashboard_snapshot(self, dashboard_id):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            status_future = pool.submit(self.authed_get, f'/services/data/{self.version}/analytics/dashboards/{dashboard_id}')
+            describe_future = pool.submit(self.authed_get, f'/services/data/{self.version}/analytics/dashboards/{dashboard_id}/describe')
+            status = status_future.result()
+            describe = describe_future.result()
+        try:
+            components = describe['components']
+            component_data = status['componentData']
+            if not isinstance(components, list) or not isinstance(component_data, list) or len(components) != len(component_data):
+                raise DataError('Dashboard component mismatch')
+            notes, metrics, bars, gauges = [], [], [], []
+            for meta, data in zip(components, component_data):
+                props = meta.get('properties') or {}
+                viz = props.get('visualizationType')
+                header = text(meta.get('header'), True) or ''
+                if viz == 'RichText':
+                    notes.append(quill_runs((props.get('content') or {}).get('richTextContent')))
+                    continue
+                if not data:
+                    continue
+                fact_map = data['reportResult']['factMap']
+                if viz == 'Metric':
+                    entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
+                    metrics.append(dict(header=header, value=number(entry.get('value'), True), label=text(entry.get('label'), True)))
+                elif viz == 'Bar':
+                    groupings = data['reportResult']['groupingsDown']['groupings']
+                    groups = []
+                    for g in groupings:
+                        entry = ((fact_map.get(g['key'] + '!T') or {}).get('aggregates') or [{}])[0]
+                        groups.append(dict(label=text(g['label']), value=number(entry.get('value'), True) or 0))
+                    bars.append(dict(header=header, groups=groups))
+                elif viz == 'Gauge':
+                    entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
+                    breaks = ((props.get('visualizationProperties') or {}).get('breakPoints') or [{}])[0].get('breaks') or []
+                    green = next((b for b in breaks if b.get('color') == '00716b'), None)
+                    gauges.append(dict(header=header, value=number(entry.get('value'), True), target=number(green['lowerBound'], True) if green else None))
+            return dict(notes=notes, metrics=metrics, bars=bars, gauges=gauges)
+        except (KeyError, TypeError, IndexError) as exc:
+            raise DataError('Invalid Salesforce dashboard response') from exc
+
     def load(self):
         from campaigns import build_config, etm_owners
         sessions = self.query("SELECT Id, Name FROM Campaign WHERE ParentId = '701TR00000tTIebYAG' AND (Name LIKE '%BR Session%' OR Name LIKE '%TH Session%')")
@@ -200,15 +280,17 @@ class Salesforce:
         fields = ['Id', 'CampaignId', 'Solutions_Rev_ACV_Net__c', 'IsWon', 'Reached_S_Status__c']
         if self.multi:
             fields.append('CurrencyIsoCode')
-        # These three queries are independent of each other (all just filter on the same
-        # campaign ids), so run them concurrently instead of waiting on each in turn.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        # These queries are independent of each other (the dashboard snapshot doesn't depend
+        # on campaign ids at all), so run them concurrently instead of waiting on each in turn.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             opps_future = pool.submit(self.query, 'SELECT ' + ','.join(fields) + f' FROM Opportunity WHERE CampaignId IN ({ids}) AND ' + restrictions() + ' ORDER BY Id')
             influence_future = pool.submit(self.query, 'SELECT Id,CampaignId,OpportunityId,' + ','.join('Opportunity.' + f for f in fields) + f' FROM CampaignInfluence WHERE CampaignId IN ({ids}) AND ' + restrictions('Opportunity.') + ' ORDER BY Id')
             members_future = pool.submit(self.query, 'SELECT Id,ContactId,LeadId,FirstName,LastName,Title,Email,CompanyOrAccount,CampaignId,Status,HasResponded,CreatedDate,Contact.Name,Contact.Email,Contact.Title,Contact.AccountId,Contact.Account.Name FROM CampaignMember WHERE CampaignId IN (' + ids + ') ORDER BY Id')
+            dashboard_future = pool.submit(self.dashboard_snapshot, DASHBOARD_ID)
             opps = opps_future.result()
             influence = influence_future.result()
             members = members_future.result()
+            sf_dashboard = dashboard_future.result()
         def opportunity(row):
             acv = number(row['Solutions_Rev_ACV_Net__c'], True)
             if self.multi:
@@ -218,7 +300,7 @@ class Salesforce:
                 if acv is not None:
                     acv = round(acv / rate, 2)
             return dict(id=check_id(row['Id']), campaignId=check_id(row['CampaignId'], True), acv=acv, isWon=boolean(row['IsWon']), saHit=boolean(row['Reached_S_Status__c']))
-        result = dict(campaigns=[], sourcedOpps=[opportunity(row) for row in opps], influence=[], rows=[], sessions=sessions, etmOwners={})
+        result = dict(campaigns=[], sourcedOpps=[opportunity(row) for row in opps], influence=[], rows=[], sessions=sessions, etmOwners={}, sfDashboard=sf_dashboard)
         for row in influence:
             o = opportunity(row['Opportunity'])
             result['influence'].append(dict(ic=check_id(row['CampaignId']), oi=check_id(row['OpportunityId']), pc=o['campaignId'], acv=o['acv'], won=o['isWon'], sa=o['saHit']))

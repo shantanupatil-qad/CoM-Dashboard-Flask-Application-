@@ -13,7 +13,7 @@ import views
 from model import event_stats, people, accounts, page_items
 from salesforce import Repository, Salesforce, DataError, check_id
 
-SCOPES = ('campaign', 'person', 'account')
+SCOPES = ('home', 'campaign', 'person', 'account')
 
 def initial_state():
     return dict(page=0, filter='', selected=None, contact=None, revision=0)
@@ -69,6 +69,8 @@ def render_view(scope, raw, repository):
 def _render_view(scope, raw, repository):
     state = validated_state(raw)
     data = repository.get()
+    if scope == 'home':
+        return views.home_page(data.get('sfDashboard'))
     if scope == 'campaign':
         return views.campaign_page(event_stats(data))
     items = people(data) if scope == 'person' else accounts(data)
@@ -189,7 +191,7 @@ def create_app(environ=None, repository=None):
     def navigate(*args):
         active = ctx.triggered_id.removeprefix('nav-') if ctx.triggered_id else args[-1]
         if active not in SCOPES:
-            active = 'campaign'
+            active = 'home'
         return [active] + [dict(display='block' if active == s else 'none') for s in SCOPES] + [views.nav_style(active == s) for s in SCOPES]
 
     def safe_render(scope, state):
@@ -203,17 +205,20 @@ def create_app(environ=None, repository=None):
             server.logger.error('Dashboard rendering failed; reference=%s', reference)
             return views.error_box('Unable to load data. Reference: '+reference, scope)
 
-    @app.callback(Output('campaign-content', 'children'), Input('active-tab', 'data'), Input('campaign-state', 'data'))
-    def campaign_content(active, state):
-        if active != 'campaign':
-            raise PreventUpdate
-        return safe_render('campaign', state)
+    def register_static(scope):
+        @app.callback(Output(scope+'-content', 'children'), Input('active-tab', 'data'), Input(scope+'-state', 'data'))
+        def content(active, state):
+            if active != scope:
+                raise PreventUpdate
+            return safe_render(scope, state)
 
-    @app.callback(Output('campaign-state', 'data'), Input({'scope':'campaign','action':ALL,'key':ALL}, 'n_clicks'), State('campaign-state', 'data'), prevent_initial_call=True)
-    def campaign_retry(clicks, state):
-        if not any(clicks):
-            raise PreventUpdate
-        return transition(state, 'retry')[0]
+        @app.callback(Output(scope+'-state', 'data'), Input({'scope':scope,'action':ALL,'key':ALL}, 'n_clicks'), State(scope+'-state', 'data'), prevent_initial_call=True)
+        def retry(clicks, state):
+            if not any(clicks):
+                raise PreventUpdate
+            return transition(state, 'retry')[0]
+    for scope in ('home', 'campaign'):
+        register_static(scope)
 
     def register(scope):
         @app.callback(Output(scope+'-state', 'data'), Output(scope+'-input', 'value'),

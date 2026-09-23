@@ -1,4 +1,5 @@
 """Dash page definitions: port of the original JSX with its inline styles and labels."""
+import plotly.graph_objects as go
 from dash import html, dcc
 from config import CAMPAIGNS, CAMPAIGN_BY_ID, FAMILIES, RED, NAVY, STEEL, GREEN, AMBER, PLUM
 from model import engaged, fmt_date, money
@@ -45,6 +46,66 @@ def event_card(ev, data):
     return div([div(family['label'],fontSize=17,fontWeight=700,color=NAVY),div(family['dates'],fontSize=13,color='#9CA3AF',marginBottom=22),
         div([pipeline('SOURCED (Primary Campaign)','#EFF6FF',NAVY,data['sourced']),pipeline('INFLUENCED (Touched, Sourced Elsewhere)','#F5F3FF',PLUM,data['influenced'])],display='flex',gap=20)],
         **{**CARD,'flex':1,'minWidth':420,'className':'qad-event-card'})
+
+def sf_note(runs):
+    children = []
+    for run in runs:
+        text = run['text']
+        if run.get('bold'):
+            text = html.Strong(text)
+        if run.get('underline'):
+            text = html.U(text)
+        children.append(text)
+    return html.P(children, style=dict(margin=0, fontSize=13, color='#374151', lineHeight=1.6))
+
+def sf_metric(metric):
+    return div([div(metric['label'] if metric.get('label') is not None else '—', fontSize=28, fontWeight=700, color=NAVY),
+                div(metric['header'], fontSize=11, color='#9CA3AF', marginTop=4, textAlign='center')],
+                background='#F9FAFB', border='1px solid #E5E7EB', borderRadius=10, padding='18px 20px', textAlign='center', flex=1, minWidth=160)
+
+def sf_bar(bar):
+    groups = bar['groups']
+    is_revenue = 'revenue' in bar['header'].lower()
+    fig = go.Figure(go.Bar(x=[g['label'] for g in groups], y=[g['value'] for g in groups],
+                            marker_color=PLUM, text=[money(g['value']) if is_revenue else g['value'] for g in groups], textposition='outside'))
+    fig.update_layout(title=None, height=260, margin=dict(l=30, r=10, t=10, b=40), paper_bgcolor='white', plot_bgcolor='white',
+                       font=dict(family='IBM Plex Sans, system-ui, sans-serif', size=11, color=STEEL), yaxis=dict(visible=False))
+    return div([div(bar['header'], fontSize=11, fontWeight=700, color=NAVY, letterSpacing=.5, marginBottom=6),
+                dcc.Graph(figure=fig, config=dict(displayModeBar=False))],
+               background='white', border='1px solid #E5E7EB', borderRadius=10, padding='16px', flex=1, minWidth=320)
+
+def sf_gauge(gauge):
+    is_revenue = 'revenue' in gauge['header'].lower()
+    value, target = gauge['value'] or 0, gauge['target'] or 1
+    fig = go.Figure(go.Indicator(mode='gauge+number', value=value,
+        number=dict(prefix='$' if is_revenue else '', valueformat=',.0f'),
+        gauge=dict(axis=dict(range=[0, max(value, target) * 1.1], visible=True),
+                   bar=dict(color=GREEN if value >= target else AMBER),
+                   threshold=dict(line=dict(color=RED, width=3), thickness=0.9, value=target),
+                   steps=[dict(range=[0, target], color='#F3F4F6')])))
+    fig.update_layout(height=220, margin=dict(l=30, r=30, t=30, b=10), paper_bgcolor='white',
+                       font=dict(family='IBM Plex Sans, system-ui, sans-serif', size=12, color=STEEL))
+    return div([div(gauge['header'], fontSize=11, fontWeight=700, color=NAVY, letterSpacing=.5, marginBottom=6, textAlign='center'),
+                dcc.Graph(figure=fig, config=dict(displayModeBar=False))],
+               background='white', border='1px solid #E5E7EB', borderRadius=10, padding='16px', flex=1, minWidth=280)
+
+def sf_section(title, dashboard):
+    key = title.lower()
+    metrics = [m for m in dashboard['metrics'] if key in m['header'].lower()]
+    bars = [b for b in dashboard['bars'] if key in b['header'].lower()]
+    gauges = [g for g in dashboard['gauges'] if key in g['header'].lower()]
+    return div([section_label(title.upper() + ' OPPORTUNITIES'),
+                div([*[sf_metric(m) for m in metrics], *[sf_gauge(g) for g in gauges]], display='flex', gap=16, flexWrap='wrap', marginBottom=16),
+                div([sf_bar(b) for b in bars], display='flex', gap=16, flexWrap='wrap')],
+               marginBottom=32)
+
+def home_page(dashboard):
+    if not dashboard or not (dashboard.get('metrics') or dashboard.get('bars') or dashboard.get('gauges')):
+        return html.P('No dashboard data available.', style=dict(color='#9CA3AF', fontSize=13))
+    return [div([sf_note(note) for note in dashboard.get('notes', [])], display='flex', gap=24, flexWrap='wrap', marginBottom=28, className='qad-sf-notes'),
+            sf_section('Influenced', dashboard), sf_section('Sourced', dashboard),
+            html.P('Live from the "QAD | Redzone - Insights - CoM FY27" Salesforce dashboard (Public Dashboards).',
+                   style=dict(marginTop=8, fontSize=11, color='#9CA3AF', textAlign='center'))]
 
 def campaign_page(events):
     return [div([event_card('namer',events['namer']),event_card('emea',events['emea'])],display='flex',gap=28,flexWrap='wrap',className='qad-event-grid'),
@@ -196,8 +257,8 @@ def nav_style(active):
                 background='#F5F6F7' if active else 'rgba(255,255,255,0.08)',color=NAVY if active else 'rgba(255,255,255,0.75)')
 
 def layout():
-    labels=[('campaign','Campaign Performance'),('person','Person Engagement'),('account','Account Engagement')]
-    tabs=div([html.Button(label,id='nav-'+key,n_clicks=0,style=nav_style(key=='campaign'),className='qad-tab') for key,label in labels],display='flex',gap=4,className='qad-tabs')
+    labels=[('home','Home'),('campaign','Campaign Performance'),('person','Person Engagement'),('account','Account Engagement')]
+    tabs=div([html.Button(label,id='nav-'+key,n_clicks=0,style=nav_style(key=='home'),className='qad-tab') for key,label in labels],display='flex',gap=4,className='qad-tabs')
     header=html.Header(div([html.Img(src='/assets/qad-redzone-logo.png',alt='QAD | Redzone',style=dict(height=28,marginBottom=14,display='block')),
         div('QAD MARKETING OPERATIONS',fontSize=11,fontWeight=700,color=RED,letterSpacing=.5,marginBottom=4,className='qad-eyebrow'),
         html.H1('Champions of Manufacturing — FY27',style=dict(margin=0,fontSize=22,fontWeight=700,color='white')),
@@ -205,11 +266,11 @@ def layout():
         div([div('LIVE OPERATIONS CONSOLE',className='qad-status-label'),div(className='qad-status-dot'),tabs],className='qad-header-bottom')],maxWidth=1600,margin='0 auto'),style=dict(background=NAVY,padding='24px 48px 0'),className='qad-header')
     panels=[]
     for scope,_ in labels:
-        contents=[] if scope=='campaign' else [filter_controls(scope)]
-        label='Pulling live data from Salesforce...' if scope=='campaign' else 'Loading people...' if scope=='person' else 'Loading accounts...'
+        contents=[] if scope in ('campaign','home') else [filter_controls(scope)]
+        label='Pulling live data from Salesforce...' if scope in ('campaign','home') else 'Loading people...' if scope=='person' else 'Loading accounts...'
         contents.append(dcc.Loading(html.Div(id=scope+'-content'),custom_spinner=spinner(label),delay_show=0))
-        panels.append(html.Div(html.Main(contents,style=MAIN,className='qad-main'),id=scope+'-panel',style=dict(display='block' if scope=='campaign' else 'none'),className='qad-panel'))
-    return div([dcc.Store(id='active-tab',data='campaign')]+[dcc.Store(id=key+'-state',data=dict(page=0,filter='',selected=None,contact=None,revision=0)) for key,_ in labels]+[header]+panels,
+        panels.append(html.Div(html.Main(contents,style=MAIN,className='qad-main'),id=scope+'-panel',style=dict(display='block' if scope=='home' else 'none'),className='qad-panel'))
+    return div([dcc.Store(id='active-tab',data='home')]+[dcc.Store(id=key+'-state',data=dict(page=0,filter='',selected=None,contact=None,revision=0)) for key,_ in labels]+[header]+panels,
         fontFamily='IBM Plex Sans, system-ui, sans-serif',background='#F5F6F7',minHeight='100vh',className='qad-shell')
 
 def source_anchor(label, kind, id):
