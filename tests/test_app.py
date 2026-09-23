@@ -73,16 +73,20 @@ class Tests(unittest.TestCase):
     def test_layout(self):
         client=create_app({}).server.test_client(); response=client.get('/_dash-layout')
         self.assertEqual(response.status_code,200)
-        for label in ('Campaign Performance','Person Engagement','Account Engagement'): self.assertIn(label,response.get_data(as_text=True))
+        # Campaign Performance is temporarily hidden from navigation; its render function
+        # (exercised directly below) and data pipeline are untouched.
+        for label in ('Home','Person Engagement','Account Engagement'): self.assertIn(label,response.get_data(as_text=True))
+        self.assertNotIn('Campaign Performance',response.get_data(as_text=True))
         self.assertNotIn('Heatmap',response.get_data(as_text=True))
         self.assertEqual(views.MAIN,dict(maxWidth=1600,margin='0 auto',padding='32px 48px 60px'))
         cards=views.campaign_page(event_stats(demo_data()))[0]
         self.assertEqual(cards.style['gap'],28)
         self.assertEqual(cards.children[0].children[-1].style,dict(display='flex',gap=20))
-    def test_campaign_callback(self):
-        client=create_app({}).server.test_client()
-        r=client.post('/_dash-update-component',json=dict(output='campaign-content.children',outputs=dict(id='campaign-content',property='children'),inputs=[dict(id='active-tab',property='data',value='campaign'),dict(id='campaign-state',property='data',value=initial_state())],state=[],changedPropIds=['active-tab.data']))
-        self.assertEqual(r.status_code,200); self.assertIn('Net ACV',r.get_data(as_text=True)); self.assertNotIn('Total members',r.get_data(as_text=True))
+    def test_campaign_page_renders(self):
+        # Campaign Performance's own callback is unregistered while the tab is hidden;
+        # this exercises the render function directly so the feature stays covered.
+        cards=views.campaign_page(event_stats(demo_data()))
+        self.assertIn('Net ACV',str(cards)); self.assertNotIn('Total members',str(cards))
     def test_pattern_callback(self):
         client=create_app({}).server.test_client(); button=dict(scope='person',action='select',key=people(demo_data())[0]['id'])
         r=client.post('/_dash-update-component',json=dict(output='..person-state.data...person-input.value..',outputs=[dict(id='person-state',property='data'),dict(id='person-input',property='value')],inputs=[[dict(id=button,property='n_clicks',value=1)],dict(id='person-input',property='n_submit',value=0)],state=[dict(id='person-state',property='data',value=initial_state()),dict(id='person-input',property='value',value='')],changedPropIds=[json.dumps(button,sort_keys=True,separators=(',',':'))+'.n_clicks']))

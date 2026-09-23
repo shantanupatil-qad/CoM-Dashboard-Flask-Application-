@@ -221,6 +221,13 @@ def pagination(scope,page,has_next,has_rows):
         action('Next →',scope,'next',disabled=not has_next,style=dict(padding='8px 18px',background=NAVY if has_next else '#E5E7EB',color='white' if has_next else '#9CA3AF',border='none',borderRadius=8,cursor='pointer' if has_next else 'default',fontSize=13,fontWeight=600))],
         display='flex',justifyContent='center',alignItems='center',gap=16,marginTop=20)
 
+def legend_item(icon,color,label):
+    return div([html.Span(icon,style=dict(color=color,fontWeight=700,fontSize=15,marginRight=6)),html.Span(label,style=dict(fontSize=12,color='#6B7280'))],display='flex',alignItems='center')
+
+def engagement_legend():
+    return div([legend_item('✓',GREEN,'Engaged'),legend_item('•','#B45309','Registered / invited, not yet engaged'),legend_item('–','#D1D5DB','No campaign membership')],
+               display='flex',gap=24,flexWrap='wrap',marginBottom=16,padding='10px 14px',background='white',borderRadius=8,border='1px solid #E5E7EB')
+
 def person_table(people,page,has_next,term):
     CAMPAIGNS = config()['widgets']
     if not people:
@@ -240,7 +247,7 @@ def person_table(people,page,has_next,term):
             cells.extend([html.Td(f"{p['engagedCount']}/{len(CAMPAIGNS)}",style={**TD,'textAlign':'center','fontWeight':700,'color':GREEN}),html.Td(action('View Timeline','person','select',p['id']),style=TD)])
             rows.append(html.Tr(cells,style=dict(borderBottom='1px solid #F3F4F6',background='white' if i%2==0 else '#FAFAFA')))
         content=div(html.Table([html.Thead([html.Tr(header1,style=dict(background=NAVY)),html.Tr(header2,style=dict(background=NAVY))]),html.Tbody(rows)],style=dict(width='100%',borderCollapse='collapse',fontSize=13)),overflowX='auto')
-    return [div(content,background='white',borderRadius=12,boxShadow='0 1px 4px rgba(0,0,0,0.06)',overflow='hidden'),pagination('person',page,has_next,bool(people))]
+    return [engagement_legend(),div(content,background='white',borderRadius=12,boxShadow='0 1px 4px rgba(0,0,0,0.06)',overflow='hidden'),pagination('person',page,has_next,bool(people))]
 
 def account_table(accounts,page,has_next,term):
     if not accounts:
@@ -299,7 +306,8 @@ def nav_style(active):
                 background='#F5F6F7' if active else 'rgba(255,255,255,0.08)',color=NAVY if active else 'rgba(255,255,255,0.75)')
 
 def layout():
-    labels=[('home','Home'),('campaign','Campaign Performance'),('person','Person Engagement'),('account','Account Engagement')]
+    # Campaign Performance is temporarily hidden (not deleted) -- re-add it here to restore.
+    labels=[('home','Home'),('person','Person Engagement'),('account','Account Engagement')]
     tabs=div([html.Button(label,id='nav-'+key,n_clicks=0,style=nav_style(key=='home'),className='qad-tab') for key,label in labels],display='flex',gap=4,className='qad-tabs')
     header=html.Header(div([html.Img(src='/assets/qad-redzone-logo.png',alt='QAD | Redzone',style=dict(height=28,marginBottom=14,display='block')),
         div('QAD MARKETING OPERATIONS',fontSize=11,fontWeight=700,color=RED,letterSpacing=.5,marginBottom=4,className='qad-eyebrow'),

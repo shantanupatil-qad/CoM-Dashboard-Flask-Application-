@@ -13,7 +13,9 @@ import views
 from model import event_stats, people, accounts, page_items
 from salesforce import Repository, Salesforce, DataError, check_id
 
-SCOPES = ('home', 'campaign', 'person', 'account')
+# Campaign Performance is temporarily hidden (not deleted) -- re-add 'campaign' here,
+# to register_static's list below, and to views.layout()'s labels to restore it.
+SCOPES = ('home', 'person', 'account')
 
 def initial_state():
     return dict(page=0, filter='', selected=None, contact=None, revision=0)
@@ -217,7 +219,7 @@ def create_app(environ=None, repository=None):
             if not any(clicks):
                 raise PreventUpdate
             return transition(state, 'retry')[0]
-    for scope in ('home', 'campaign'):
+    for scope in ('home',):
         register_static(scope)
 
     def register(scope):
