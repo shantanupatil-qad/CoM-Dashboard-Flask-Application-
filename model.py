@@ -87,11 +87,15 @@ def people(data):
         p['latest'] = max(p['latest'], r['cd'])
         p['memberships'].append(dict(campaignId=r['camp'], status=r['st'], hasResponded=r['hr'], createdDate=r['cd']))
     result = list(grouped.values())
+    from campaigns import config, widget_count
+    family = config()['family']
     for p in result:
-        from campaigns import widget_count
         p['engagedCount'] = widget_count(p['memberships'])
         p['opportunities'] = data.get('personOpportunities', {}).get(p['id'], [])
-    return sorted(result, key=lambda p: (p['latest'], p['id']), reverse=True)
+    result.sort(key=lambda p: (p['latest'], p['id']), reverse=True)
+    # NAMER-engaged people first, then EMEA-only, preserving the recency order within each group.
+    result.sort(key=lambda p: 0 if any(family.get(m['campaignId']) == 'namer' for m in p['memberships']) else 1)
+    return result
 
 def accounts(data):
     grouped = {}
