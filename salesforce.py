@@ -238,6 +238,10 @@ class Salesforce:
             component_data = status['componentData']
             if not isinstance(components, list) or not isinstance(component_data, list) or len(components) != len(component_data):
                 raise DataError('Dashboard component mismatch')
+            def color_breaks(props):
+                breaks = ((props.get('visualizationProperties') or {}).get('breakPoints') or [{}])[0].get('breaks') or []
+                return [dict(color='#' + b['color'], lowerBound=number(b['lowerBound'], True) if b.get('lowerBound') is not None else None,
+                             upperBound=number(b['upperBound'], True) if b.get('upperBound') is not None else None) for b in breaks]
             notes, metrics, bars, gauges = [], [], [], []
             for meta, data in zip(components, component_data):
                 props = meta.get('properties') or {}
@@ -251,19 +255,20 @@ class Salesforce:
                 fact_map = data['reportResult']['factMap']
                 if viz == 'Metric':
                     entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
-                    metrics.append(dict(header=header, value=number(entry.get('value'), True), label=text(entry.get('label'), True)))
+                    metrics.append(dict(header=header, value=number(entry.get('value'), True), label=text(entry.get('label'), True), breaks=color_breaks(props)))
                 elif viz == 'Bar':
                     groupings = data['reportResult']['groupingsDown']['groupings']
                     groups = []
                     for g in groupings:
                         entry = ((fact_map.get(g['key'] + '!T') or {}).get('aggregates') or [{}])[0]
-                        groups.append(dict(label=text(g['label']), value=number(entry.get('value'), True) or 0))
+                        groups.append(dict(label=text(g['label']), value=number(entry.get('value'), True) or 0, valueLabel=text(entry.get('label'), True)))
                     bars.append(dict(header=header, groups=groups))
                 elif viz == 'Gauge':
                     entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
-                    breaks = ((props.get('visualizationProperties') or {}).get('breakPoints') or [{}])[0].get('breaks') or []
-                    green = next((b for b in breaks if b.get('color') == '00716b'), None)
-                    gauges.append(dict(header=header, value=number(entry.get('value'), True), target=number(green['lowerBound'], True) if green else None))
+                    breaks = color_breaks(props)
+                    green = next((b for b in breaks if b['color'] == '#00716b'), None)
+                    gauges.append(dict(header=header, value=number(entry.get('value'), True), label=text(entry.get('label'), True),
+                                        target=green['lowerBound'] if green else None, breaks=breaks))
             return dict(notes=notes, metrics=metrics, bars=bars, gauges=gauges)
         except (KeyError, TypeError, IndexError) as exc:
             raise DataError('Invalid Salesforce dashboard response') from exc

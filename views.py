@@ -58,54 +58,68 @@ def sf_note(runs):
         children.append(text)
     return html.P(children, style=dict(margin=0, fontSize=13, color='#374151', lineHeight=1.6))
 
+def break_color(value, breaks, default=NAVY):
+    if value is None:
+        return default
+    for b in breaks:
+        lo, hi = b.get('lowerBound'), b.get('upperBound')
+        if (lo is None or value >= lo) and (hi is None or value < hi):
+            return b['color']
+    return default
+
 def sf_metric(metric):
-    return div([div(metric['label'] if metric.get('label') is not None else '—', fontSize=28, fontWeight=700, color=NAVY),
+    color = break_color(metric.get('value'), metric.get('breaks') or [])
+    return div([div(metric['label'] if metric.get('label') is not None else '—', fontSize=28, fontWeight=700, color=color),
                 div(metric['header'], fontSize=11, color='#9CA3AF', marginTop=4, textAlign='center')],
                 background='#F9FAFB', border='1px solid #E5E7EB', borderRadius=10, padding='18px 20px', textAlign='center', flex=1, minWidth=160)
 
 def sf_bar(bar):
     groups = bar['groups']
-    is_revenue = 'revenue' in bar['header'].lower()
     fig = go.Figure(go.Bar(x=[g['label'] for g in groups], y=[g['value'] for g in groups],
-                            marker_color=PLUM, text=[money(g['value']) if is_revenue else g['value'] for g in groups], textposition='outside'))
+                            marker_color=PLUM, text=[g.get('valueLabel') or g['value'] for g in groups], textposition='outside'))
     fig.update_layout(title=None, height=260, margin=dict(l=30, r=10, t=10, b=40), paper_bgcolor='white', plot_bgcolor='white',
                        font=dict(family='IBM Plex Sans, system-ui, sans-serif', size=11, color=STEEL), yaxis=dict(visible=False))
     return div([div(bar['header'], fontSize=11, fontWeight=700, color=NAVY, letterSpacing=.5, marginBottom=6),
                 dcc.Graph(figure=fig, config=dict(displayModeBar=False))],
-               background='white', border='1px solid #E5E7EB', borderRadius=10, padding='16px', flex=1, minWidth=320)
+               background='white', border='1px solid #E5E7EB', borderRadius=10, padding='16px', flex=1, minWidth=280)
 
 def sf_gauge(gauge):
-    is_revenue = 'revenue' in gauge['header'].lower()
-    value, target = gauge['value'] or 0, gauge['target'] or 1
-    fig = go.Figure(go.Indicator(mode='gauge+number', value=value,
-        number=dict(prefix='$' if is_revenue else '', valueformat=',.0f'),
-        gauge=dict(axis=dict(range=[0, max(value, target) * 1.1], visible=True),
-                   bar=dict(color=GREEN if value >= target else AMBER),
-                   threshold=dict(line=dict(color=RED, width=3), thickness=0.9, value=target),
-                   steps=[dict(range=[0, target], color='#F3F4F6')])))
+    value = gauge.get('value') or 0
+    breaks = gauge.get('breaks') or []
+    bounds = [b['upperBound'] for b in breaks if b.get('upperBound') is not None]
+    axis_max = max(bounds + [value, 1]) * 1.05
+    # Salesforce's breakpoints mark narrow transition points around the target (e.g. red
+    # ends at 15,000,001, amber at 15,000,002); rendering them literally would leave most of
+    # the gauge blank. Filling cumulatively from 0 gives the intended "below/at/above target" bands.
+    steps, prev = [], 0
+    for b in breaks:
+        upper = b['upperBound'] if b.get('upperBound') is not None else axis_max
+        steps.append(dict(range=[prev, upper], color=b['color']))
+        prev = upper
+    fig = go.Figure(go.Indicator(mode='gauge+number', value=value, number=dict(valueformat=','),
+        gauge=dict(axis=dict(range=[0, axis_max], visible=True), bar=dict(color='rgba(15,16,17,0.55)', thickness=0.35), steps=steps)))
     fig.update_layout(height=220, margin=dict(l=30, r=30, t=30, b=10), paper_bgcolor='white',
                        font=dict(family='IBM Plex Sans, system-ui, sans-serif', size=12, color=STEEL))
     return div([div(gauge['header'], fontSize=11, fontWeight=700, color=NAVY, letterSpacing=.5, marginBottom=6, textAlign='center'),
                 dcc.Graph(figure=fig, config=dict(displayModeBar=False))],
                background='white', border='1px solid #E5E7EB', borderRadius=10, padding='16px', flex=1, minWidth=280)
 
-def sf_section(title, dashboard):
-    key = title.lower()
-    metrics = [m for m in dashboard['metrics'] if key in m['header'].lower()]
-    bars = [b for b in dashboard['bars'] if key in b['header'].lower()]
-    gauges = [g for g in dashboard['gauges'] if key in g['header'].lower()]
-    return div([section_label(title.upper() + ' OPPORTUNITIES'),
-                div([*[sf_metric(m) for m in metrics], *[sf_gauge(g) for g in gauges]], display='flex', gap=16, flexWrap='wrap', marginBottom=16),
-                div([sf_bar(b) for b in bars], display='flex', gap=16, flexWrap='wrap')],
-               marginBottom=32)
-
 def home_page(dashboard):
     if not dashboard or not (dashboard.get('metrics') or dashboard.get('bars') or dashboard.get('gauges')):
         return html.P('No dashboard data available.', style=dict(color='#9CA3AF', fontSize=13))
+    by_header = {item['header']: item for group in ('metrics', 'bars', 'gauges') for item in dashboard.get(group, [])}
+    # Mirrors the real dashboard's exact grid: 4 metric/bar columns (Influenced Opps,
+    # Influenced Revenue, Sourced Opps, Sourced Revenue), then 2 half-width gauges below.
+    metric_headers = ['Total Influenced Opportunities', 'Total Influenced Solutions Revenue', 'Total Sourced Opportunities', 'Total Sourced Solutions Revenue']
+    bar_headers = ['Influenced Opportunities by Region', 'Influenced Solutions Revenue by Region', 'Sourced Opportunities by Region', 'Sourced Solutions Revenue by Region']
+    gauge_headers = ['Influence Pipeline - Services Revenue Target', 'Sourced Pipeline - Services Revenue Target']
+    metrics_row = div([sf_metric(by_header[h]) for h in metric_headers if h in by_header], display='flex', gap=16, marginBottom=16, flexWrap='wrap')
+    bars_row = div([sf_bar(by_header[h]) for h in bar_headers if h in by_header], display='flex', gap=16, marginBottom=16, flexWrap='wrap')
+    gauges_row = div([sf_gauge(by_header[h]) for h in gauge_headers if h in by_header], display='flex', gap=16, flexWrap='wrap')
     return [div([sf_note(note) for note in dashboard.get('notes', [])], display='flex', gap=24, flexWrap='wrap', marginBottom=28, className='qad-sf-notes'),
-            sf_section('Influenced', dashboard), sf_section('Sourced', dashboard),
+            metrics_row, bars_row, gauges_row,
             html.P('Live from the "QAD | Redzone - Insights - CoM FY27" Salesforce dashboard (Public Dashboards).',
-                   style=dict(marginTop=8, fontSize=11, color='#9CA3AF', textAlign='center'))]
+                   style=dict(marginTop=24, fontSize=11, color='#9CA3AF', textAlign='center'))]
 
 def campaign_page(events):
     return [div([event_card('namer',events['namer']),event_card('emea',events['emea'])],display='flex',gap=28,flexWrap='wrap',className='qad-event-grid'),
