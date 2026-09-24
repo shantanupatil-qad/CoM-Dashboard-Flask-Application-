@@ -87,20 +87,17 @@ def people(data):
         p['latest'] = max(p['latest'], r['cd'])
         p['memberships'].append(dict(campaignId=r['camp'], status=r['st'], hasResponded=r['hr'], createdDate=r['cd']))
     result = list(grouped.values())
-    from campaigns import config, widget_count, widget_engaged
+    from campaigns import config, widget_count
     family = config()['family']
-    widgets = config()['widgets']
     for p in result:
         p['engagedCount'] = widget_count(p['memberships'])
-        p['namerEngaged'] = sum(widget_engaged(w, p['memberships']) for w in widgets if w['event'] == 'namer')
-        p['emeaEngaged'] = sum(widget_engaged(w, p['memberships']) for w in widgets if w['event'] == 'emea')
         p['opportunities'] = data.get('personOpportunities', {}).get(p['id'], [])
     result.sort(key=lambda p: (p['latest'], p['id']), reverse=True)
-    # NAMER-engaged people first, then EMEA-only; within each group, most engagements
-    # in that group's region come first, ties broken by the recency order above.
+    # NAMER-engaged people first, then EMEA-only; within each group, highest overall
+    # Engaged count comes first, ties broken by the recency order above.
     def region_rank(p):
         is_namer = any(family.get(m['campaignId']) == 'namer' for m in p['memberships'])
-        return (0, -p['namerEngaged']) if is_namer else (1, -p['emeaEngaged'])
+        return (0 if is_namer else 1, -p['engagedCount'])
     result.sort(key=region_rank)
     return result
 
@@ -118,7 +115,9 @@ def accounts(data):
         a['personOpportunities'] = data.get('personOpportunities', {})
         a['contactCount'] = len({r['cid'] for r in a['rows']})
         a['engagedTouchpoints'] = sum(engaged(r['st'], r['hr']) for r in a['rows'])
-    return sorted(result, key=lambda a: (a['latest'], a['aid']), reverse=True)
+    result.sort(key=lambda a: (a['latest'], a['aid']), reverse=True)
+    result.sort(key=lambda a: -a['engagedTouchpoints'])
+    return result
 
 def page_items(items, page, term='', fields=()):
     if type(page) is not int or not 0 <= page <= 10000 or not isinstance(term, str) or len(term) > 120:
