@@ -283,7 +283,9 @@ class Salesforce:
 
     def load(self):
         from campaigns import build_config, etm_owners
-        sessions = self.query("SELECT Id, Name FROM Campaign WHERE ParentId = '701TR00000tTIebYAG' AND (Name LIKE '%BR Session%' OR Name LIKE '%TH Session%')")
+        sessions = self.query("SELECT Id, Name FROM Campaign WHERE "
+                               "(ParentId = '701TR00000tTIebYAG' AND (Name LIKE '%BR Session%' OR Name LIKE '%TH Session%')) "
+                               "OR (ParentId = '701TR00000ttfUHYAY' AND Name LIKE '%EMEA Session%')")
         for row in sessions:
             check_id(row['Id']); text(row['Name'])
         cfg = build_config(sessions)

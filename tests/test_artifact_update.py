@@ -14,7 +14,7 @@ class ArtifactTests(unittest.TestCase):
         self.token=CURRENT.set(self.cfg)
     def tearDown(self): CURRENT.reset(self.token)
     def test_discovery_and_group_count(self):
-        self.assertEqual(len(self.cfg['widgets']),11)
+        self.assertEqual(len(self.cfg['widgets']),12)
         self.assertEqual(len(self.cfg['campaigns']),12)
         self.assertEqual(self.cfg['by_id'][self.sessions[0]['Id']]['label'],'AI')
         members=[dict(campaignId=s['Id'],status='Registered',hasResponded=False,createdDate='2026-09-01') for s in self.sessions[:2]]

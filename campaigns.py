@@ -8,8 +8,14 @@ BASE = [dict(next(c for c in ORIGINAL if c['id']==id),label=label) for id,label 
 ('701TR000017I31KYAS','On Floor Demo'),('701TR00000ttfUHYAY','Registration'),
 ('701TR0000179FuaYAE','Executive Meeting'),('701TR000017R4SnYAK','On Floor Demo')]]
 BASE.append(dict(id='701TR000017vR5OYAU',event='emea',label='QR Code Scan',abbr='QR'))
+def session_row(r):
+    name=re.sub(r'^#CoM\s+','',r['Name'])
+    if re.match(r'EMEA Session-',name,re.I):
+        return dict(id=r['Id'],event='emea',label=re.sub(r'^EMEA Session-','',name,flags=re.I),group='session')
+    return dict(id=r['Id'],event='namer',label=re.sub(r'^(BR|TH) Session-','',name),group='breakout' if re.search('BR Session',name,re.I) else 'theater')
+
 def build_config(rows=()):
-    sessions=[dict(id=r['Id'],event='namer',label=re.sub(r'^(BR|TH) Session-','',re.sub(r'^#CoM\s+','',r['Name'])),group='breakout' if re.search('BR Session',r['Name'],re.I) else 'theater') for r in rows]
+    sessions=[session_row(r) for r in rows]
     campaigns=BASE+sessions
     widgets=[]
     for event in ('namer','emea'):
@@ -19,7 +25,9 @@ def build_config(rows=()):
                 widgets.append(dict(id=c['id'],event=event,label=c['label']+f' ({suffix})',abbr=c['abbr'],type='individual',campaignIds=[c['id']]))
         if event=='namer':
             for group,label,abbr in [('theater','Theater Session','TH'),('breakout','Breakout Session','BR')]:
-                widgets.append(dict(id=group,event=event,label=label+' (NAmer)',abbr=abbr,type='grouped',campaignIds=[c['id'] for c in sessions if c['group']==group]))
+                widgets.append(dict(id=group,event=event,label=label+' (NAmer)',abbr=abbr,type='grouped',campaignIds=[c['id'] for c in sessions if c['event']=='namer' and c['group']==group]))
+        else:
+            widgets.append(dict(id='session',event=event,label='Session (EMEA)',abbr='Sess',type='grouped',campaignIds=[c['id'] for c in sessions if c['event']=='emea']))
     return dict(campaigns=campaigns,widgets=widgets,by_id={c['id']:c for c in campaigns},family={c['id']:c['event'] for c in campaigns})
 CURRENT=ContextVar('campaign_config',default=build_config())
 def config(): return CURRENT.get()
