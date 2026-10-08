@@ -120,7 +120,7 @@ def sf_bar(bar):
                **SF_CARD, flex=1, minWidth=300)
 
 def sf_image(image):
-    return html.Img(src=image['dataUri'], style=dict(width='100%', display='block', borderRadius=4, flex='1 1 auto'))
+    return html.Img(src=image['dataUri'], style=dict(width='100%', height=120, objectFit='cover', display='block', borderRadius=4, flex='1 1 auto'))
 
 def sf_gauge(gauge):
     value = gauge.get('value') or 0
