@@ -97,18 +97,30 @@ def sf_metric(metric):
                **SF_CARD, flex=1, minWidth=220)
 
 def sf_bar(bar):
-    groups = list(reversed(bar['groups']))
-    fig = go.Figure(go.Bar(y=[g['label'] for g in groups], x=[g['value'] for g in groups], orientation='h',
-                            marker_color=SF_BLUE, text=[g.get('valueLabel') or g['value'] for g in groups], textposition='outside', cliponaxis=False))
+    vertical = bar.get('orientation') == 'v'
+    groups = bar['groups'] if vertical else list(reversed(bar['groups']))
+    if vertical:
+        trace = go.Bar(x=[g['label'] for g in groups], y=[g['value'] for g in groups], marker_color=SF_BLUE,
+                        text=[g.get('valueLabel') or g['value'] for g in groups], textposition='outside', cliponaxis=False)
+        axes = dict(xaxis=dict(title=dict(text=bar.get('groupingLabel'), font=dict(size=10)), automargin=True),
+                    yaxis=dict(showgrid=True, gridcolor='#F3F2F2', zeroline=False))
+    else:
+        trace = go.Bar(y=[g['label'] for g in groups], x=[g['value'] for g in groups], orientation='h', marker_color=SF_BLUE,
+                        text=[g.get('valueLabel') or g['value'] for g in groups], textposition='outside', cliponaxis=False)
+        axes = dict(yaxis=dict(title=dict(text=bar.get('groupingLabel'), font=dict(size=10)), automargin=True),
+                    xaxis=dict(showgrid=True, gridcolor='#F3F2F2', zeroline=False))
+    fig = go.Figure(trace)
     fig.update_layout(margin=dict(l=10, r=40, t=10, b=10), height=220, paper_bgcolor='white', plot_bgcolor='white',
                        font=dict(family='Salesforce Sans, IBM Plex Sans, system-ui, sans-serif', size=11, color='#3E3E3C'),
-                       yaxis=dict(title=dict(text=bar.get('groupingLabel'), font=dict(size=10)), automargin=True),
-                       xaxis=dict(showgrid=True, gridcolor='#F3F2F2', zeroline=False))
+                       **axes)
     return div([div([div(bar['header'], fontSize=15, color=SF_TEXT), sf_card_icons(bar)], display='flex', justifyContent='space-between', alignItems='flex-start'),
                 div(bar.get('aggregateLabel') or '', fontSize=11, color=SF_GRAY, textAlign='center', marginTop=4),
                 dcc.Graph(figure=fig, config=dict(displayModeBar=False)),
                 sf_card_footer(bar)],
                **SF_CARD, flex=1, minWidth=300)
+
+def sf_image(image):
+    return html.Img(src=image['dataUri'], style=dict(width='100%', display='block', borderRadius=4, flex='1 1 auto'))
 
 def sf_gauge(gauge):
     value = gauge.get('value') or 0
@@ -138,21 +150,36 @@ def sf_dashboard_link():
     return html.A('Open in Salesforce ↗', href=SF_DASHBOARD_LINK_URL, target='_blank', rel='noreferrer',
                    style=dict(display='inline-block', marginBottom=16, fontSize=13, fontWeight=600, color=SF_LINK, textDecoration='none'))
 
+SF_ITEM_RENDERERS = dict(image=sf_image, metric=sf_metric, bar=sf_bar, gauge=sf_gauge, note=lambda item: sf_note(item['runs']))
+
+def dashboard_rows(items):
+    # Groups tiles by their Salesforce grid row (sorted row-then-column, since the API doesn't
+    # return components in visual order), so the Home tab's row structure tracks the live
+    # dashboard's own layout instead of a hardcoded set of expected tiles.
+    ordered = sorted(items, key=lambda it: (it['position']['row'], it['position']['column']))
+    rows, current_row, current = [], None, []
+    for item in ordered:
+        row = item['position']['row']
+        if current and row != current_row:
+            rows.append(current)
+            current = []
+        current_row = row
+        current.append(item)
+    if current:
+        rows.append(current)
+    return rows
+
+def dashboard_item(item):
+    node = SF_ITEM_RENDERERS[item['kind']](item)
+    node.style['flex'] = f"{item['position']['colspan']} 1 240px"
+    return node
+
 def home_page(dashboard):
-    if not dashboard or not (dashboard.get('metrics') or dashboard.get('bars') or dashboard.get('gauges')):
+    items = [item for item in (dashboard or {}).get('items', []) if item['kind'] in SF_ITEM_RENDERERS]
+    if not items:
         return [sf_dashboard_link(), html.P('No dashboard data available.', style=dict(color='#9CA3AF', fontSize=13))]
-    by_header = {item['header']: item for group in ('metrics', 'bars', 'gauges') for item in dashboard.get(group, [])}
-    # Mirrors the real dashboard's exact grid: 4 metric/bar columns (Influenced Opps,
-    # Influenced Revenue, Sourced Opps, Sourced Revenue), then 2 half-width gauges below.
-    metric_headers = ['Total Influenced Opportunities', 'Total Influenced Solutions Revenue', 'Total Sourced Opportunities', 'Total Sourced Solutions Revenue']
-    bar_headers = ['Influenced Opportunities by Region', 'Influenced Solutions Revenue by Region', 'Sourced Opportunities by Region', 'Sourced Solutions Revenue by Region']
-    gauge_headers = ['Influence Pipeline - Services Revenue Target', 'Sourced Pipeline - Services Revenue Target']
-    metrics_row = div([sf_metric(by_header[h]) for h in metric_headers if h in by_header], display='flex', gap=1)
-    bars_row = div([sf_bar(by_header[h]) for h in bar_headers if h in by_header], display='flex', gap=1, marginTop=1)
-    gauges_row = div([sf_gauge(by_header[h]) for h in gauge_headers if h in by_header], display='flex', gap=1, marginTop=1)
-    return [sf_dashboard_link(),
-            div([sf_note(note) for note in dashboard.get('notes', [])], display='flex', gap=1, marginBottom=20),
-            metrics_row, bars_row, gauges_row,
+    rows = [div([dashboard_item(item) for item in row], display='flex', flexWrap='wrap', gap=8, marginTop=8) for row in dashboard_rows(items)]
+    return [sf_dashboard_link(), *rows,
             html.P('Live from the "QAD | Redzone - Insights - CoM FY27" Salesforce dashboard (Public Dashboards).',
                    style=dict(marginTop=24, fontSize=11, color='#9CA3AF', textAlign='center'))]
 

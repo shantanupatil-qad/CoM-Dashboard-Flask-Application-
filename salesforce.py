@@ -1,4 +1,5 @@
 """Read-only Salesforce OAuth/REST adapter for complete dashboard snapshots."""
+import base64
 import concurrent.futures
 import json
 import math
@@ -63,6 +64,7 @@ def boolean(value):
 # The official "QAD | Redzone - Insights - CoM FY27" Salesforce dashboard (Public Dashboards
 # folder), replicated on the app's Home tab using its own live, pre-computed report results.
 DASHBOARD_ID = '01ZTR00000ECX6b2AH'
+IMAGE_MIME = {'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'gif': 'image/gif'}
 
 def quill_runs(rich_text_json):
     # Parses a Quill Delta-style rich text note into plain runs of text with bold/underline
@@ -227,6 +229,30 @@ class Salesforce:
         except ValueError:
             raise DataError('Invalid Salesforce dashboard response') from None
 
+    def authed_get_bytes(self, path):
+        if not self.token:
+            self.login()
+        response = self.request(path, method='GET', headers={'Authorization': 'Bearer ' + self.token})
+        if response.status_code == 401:
+            self.login()
+            response = self.request(path, method='GET', headers={'Authorization': 'Bearer ' + self.token})
+        if response.status_code != 200:
+            raise DataError('Salesforce dashboard image fetch failed')
+        return response.content
+
+    def dashboard_image(self, content_document_id):
+        rows = self.query(f"SELECT Id, FileExtension FROM ContentVersion WHERE ContentDocumentId = '{check_id(content_document_id)}' AND IsLatest = true")
+        if len(rows) != 1:
+            raise DataError('Dashboard image asset not found')
+        version_id = check_id(rows[0]['Id'])
+        mime = IMAGE_MIME.get((text(rows[0].get('FileExtension'), True) or '').lower())
+        if not mime:
+            raise DataError('Unsupported dashboard image type')
+        data = self.authed_get_bytes(f'/services/data/{self.version}/sobjects/ContentVersion/{version_id}/VersionData')
+        if len(data) > 5_000_000:
+            raise DataError('Dashboard image exceeds the embed size limit')
+        return f'data:{mime};base64,' + base64.b64encode(data).decode('ascii')
+
     def dashboard_snapshot(self, dashboard_id):
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             status_future = pool.submit(self.authed_get, f'/services/data/{self.version}/analytics/dashboards/{dashboard_id}')
@@ -236,19 +262,32 @@ class Salesforce:
         try:
             components = describe['components']
             component_data = status['componentData']
-            if not isinstance(components, list) or not isinstance(component_data, list) or len(components) != len(component_data):
+            positions = describe['layout']['components']
+            if (not isinstance(components, list) or not isinstance(component_data, list) or not isinstance(positions, list)
+                    or len(components) != len(component_data) or len(components) != len(positions)):
                 raise DataError('Dashboard component mismatch')
+            def position_of(p):
+                return dict(row=number(p['row'], integer=True), column=number(p['column'], integer=True),
+                            colspan=number(p['colspan'], integer=True), rowspan=number(p['rowspan'], integer=True))
             def color_breaks(props):
                 breaks = ((props.get('visualizationProperties') or {}).get('breakPoints') or [{}])[0].get('breaks') or []
                 return [dict(color='#' + b['color'], lowerBound=number(b['lowerBound'], True) if b.get('lowerBound') is not None else None,
                              upperBound=number(b['upperBound'], True) if b.get('upperBound') is not None else None) for b in breaks]
-            notes, metrics, bars, gauges = [], [], [], []
-            for meta, data in zip(components, component_data):
+            items = []
+            # Mirrors the live dashboard's own component list and grid layout exactly, in whatever
+            # order/shape Salesforce currently defines it, rather than hunting for specific headers --
+            # this keeps the Home tab in sync even as the dashboard's own authors rename or add tiles.
+            for meta, data, pos in zip(components, component_data, positions):
                 props = meta.get('properties') or {}
                 viz = props.get('visualizationType')
                 header = text(meta.get('header'), True) or ''
+                position = position_of(pos)
+                if viz == 'Image':
+                    info = json.loads((props.get('content') or {}).get('additionalInfo') or '{}')
+                    items.append(dict(kind='image', dataUri=self.dashboard_image(check_id(info.get('contentDocumentId'))), position=position))
+                    continue
                 if viz == 'RichText':
-                    notes.append(quill_runs((props.get('content') or {}).get('richTextContent')))
+                    items.append(dict(kind='note', runs=quill_runs((props.get('content') or {}).get('richTextContent')), position=position))
                     continue
                 if not data:
                     continue
@@ -262,23 +301,25 @@ class Salesforce:
                               aggregateLabel=text((extended.get('aggregateColumnInfo') or {}).get(aggregate_name, {}).get('label'), True))
                 if viz == 'Metric':
                     entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
-                    metrics.append(dict(**common, value=number(entry.get('value'), True), label=text(entry.get('label'), True), breaks=color_breaks(props)))
-                elif viz == 'Bar':
+                    items.append(dict(kind='metric', **common, value=number(entry.get('value'), True), label=text(entry.get('label'), True),
+                                       breaks=color_breaks(props), position=position))
+                elif viz in ('Bar', 'Column'):
                     groupings = result['groupingsDown']['groupings']
                     grouping_info = next(iter((extended.get('groupingColumnInfo') or {}).values()), {})
                     groups = []
                     for g in groupings:
                         entry = ((fact_map.get(g['key'] + '!T') or {}).get('aggregates') or [{}])[0]
                         groups.append(dict(label=text(g['label']), value=number(entry.get('value'), True) or 0, valueLabel=text(entry.get('label'), True)))
-                    bars.append(dict(**common, groups=groups, groupingLabel=text(grouping_info.get('label'), True)))
+                    items.append(dict(kind='bar', orientation='v' if viz == 'Column' else 'h', **common, groups=groups,
+                                       groupingLabel=text(grouping_info.get('label'), True), position=position))
                 elif viz == 'Gauge':
                     entry = ((fact_map.get('T!T') or {}).get('aggregates') or [{}])[0]
                     breaks = color_breaks(props)
                     green = next((b for b in breaks if b['color'] == '#00716b'), None)
-                    gauges.append(dict(**common, value=number(entry.get('value'), True), label=text(entry.get('label'), True),
-                                        target=green['lowerBound'] if green else None, breaks=breaks))
-            return dict(notes=notes, metrics=metrics, bars=bars, gauges=gauges)
-        except (KeyError, TypeError, IndexError) as exc:
+                    items.append(dict(kind='gauge', **common, value=number(entry.get('value'), True), label=text(entry.get('label'), True),
+                                       target=green['lowerBound'] if green else None, breaks=breaks, position=position))
+            return dict(items=items)
+        except (KeyError, TypeError, IndexError, ValueError) as exc:
             raise DataError('Invalid Salesforce dashboard response') from exc
 
     def load(self):
