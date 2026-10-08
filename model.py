@@ -87,18 +87,14 @@ def people(data):
         p['latest'] = max(p['latest'], r['cd'])
         p['memberships'].append(dict(campaignId=r['camp'], status=r['st'], hasResponded=r['hr'], createdDate=r['cd']))
     result = list(grouped.values())
-    from campaigns import config, widget_count
-    family = config()['family']
+    from campaigns import widget_count
     for p in result:
         p['engagedCount'] = widget_count(p['memberships'])
         p['opportunities'] = data.get('personOpportunities', {}).get(p['id'], [])
     result.sort(key=lambda p: (p['latest'], p['id']), reverse=True)
-    # NAMER-engaged people first, then EMEA-only; within each group, highest overall
-    # Engaged count comes first, ties broken by the recency order above.
-    def region_rank(p):
-        is_namer = any(family.get(m['campaignId']) == 'namer' for m in p['memberships'])
-        return (0 if is_namer else 1, -p['engagedCount'])
-    result.sort(key=region_rank)
+    # Highest Engaged touchpoint count first, regardless of NAMER/EMEA; ties
+    # broken by the recency order above.
+    result.sort(key=lambda p: -p['engagedCount'])
     return result
 
 def accounts(data):
